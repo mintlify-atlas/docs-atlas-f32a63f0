@@ -1,0 +1,128 @@
+{
+  "projectType": "framework",
+  "projectName": "Telebot",
+  "projectDescription": "A concise, high-performance Go framework for building Telegram bots with routing, middleware, keyboards, inline mode, and a transparent File API.",
+  "theme": "palm",
+  "primaryColor": "#74d7ed",
+  "lightColor": "#38484e",
+  "darkColor": "#d8e0df",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/bot",
+              "concepts/context",
+              "concepts/handlers",
+              "concepts/middleware",
+              "concepts/poller"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/commands",
+              "guides/keyboards",
+              "guides/files",
+              "guides/sendable",
+              "guides/editable",
+              "guides/inline-mode",
+              "guides/payments",
+              "guides/webhooks"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/layout",
+              "advanced/custom-middleware",
+              "advanced/custom-poller",
+              "advanced/error-handling"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Bot",
+            "pages": [
+              "api/bot",
+              "api/settings"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/context",
+              "api/message",
+              "api/update",
+              "api/markup",
+              "api/file",
+              "api/sendable",
+              "api/editable"
+            ]
+          },
+          {
+            "group": "Middleware",
+            "pages": [
+              "api/middleware"
+            ]
+          },
+          {
+            "group": "Events",
+            "pages": [
+              "api/endpoints"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Concise command routing with support for slash commands, text patterns, and Telegram update types",
+    "Middleware system with global, group, and handler-level scopes",
+    "Transparent File API that handles upload, download, and caching automatically",
+    "Flexible keyboard builder supporting both reply and inline keyboards",
+    "Inline mode support for responding to inline queries with rich result types",
+    "Long-polling and webhook pollers with a custom Poller interface",
+    "Layout package for YAML-driven bot configuration and i18n locales",
+    "Context interface wrapping updates with helpers for all common operations"
+  ],
+  "publicApiSurface": [
+    "NewBot(pref Settings) (*Bot, error)",
+    "Bot.Handle(endpoint interface{}, h HandlerFunc, m ...MiddlewareFunc)",
+    "Bot.Start()",
+    "Bot.Stop()",
+    "Bot.Send(to Recipient, what interface{}, opts ...interface{}) (*Message, error)",
+    "Bot.Edit(msg Editable, what interface{}, opts ...interface{}) (*Message, error)",
+    "Bot.Delete(msg Editable) error",
+    "Bot.Use(middleware ...MiddlewareFunc)",
+    "Bot.Group() *Group",
+    "Context (interface)",
+    "HandlerFunc",
+    "MiddlewareFunc",
+    "Poller (interface)",
+    "LongPoller",
+    "Webhook",
+    "ReplyMarkup",
+    "Settings",
+    "OnText, OnPhoto, OnCallback, OnQuery, ... (event constants)",
+    "middleware.Logger()",
+    "middleware.AutoRespond()",
+    "middleware.Whitelist(userIDs ...int64)",
+    "middleware.Recover()",
+    "layout.New(path string) (*Layout, error)"
+  ]
+}
