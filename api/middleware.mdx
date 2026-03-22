@@ -1,0 +1,230 @@
+---
+title: "Middleware"
+description: "Built-in middleware functions from the gopkg.in/telebot.v4/middleware subpackage."
+---
+
+The `middleware` subpackage (`gopkg.in/telebot.v4/middleware`) provides a set of ready-to-use middleware functions that can be applied globally, to a group, or to individual handlers.
+
+## Types
+
+### MiddlewareFunc
+
+```go
+type MiddlewareFunc func(HandlerFunc) HandlerFunc
+```
+
+`MiddlewareFunc` is defined in the core `telebot` package. It wraps a `HandlerFunc` with additional logic and returns a new `HandlerFunc`. Middleware runs before the endpoint handler.
+
+### RecoverFunc
+
+```go
+type RecoverFunc = func(error, tele.Context)
+```
+
+A type alias for the error callback used by the `Recover` middleware. Receives the recovered error and the current context.
+
+---
+
+## Applying Middleware
+
+There are three ways to attach middleware in Telebot.
+
+### Global — `b.Use()`
+
+Applies middleware to every handler registered on the bot.
+
+```go
+b.Use(middleware.Logger())
+b.Use(middleware.Recover())
+```
+
+### Group — `g.Use()`
+
+Creates a scoped group and applies middleware only to handlers registered within it.
+
+```go
+adminGroup := b.Group()
+adminGroup.Use(middleware.Whitelist(adminID1, adminID2))
+
+adminGroup.Handle("/ban", onBan)
+adminGroup.Handle("/kick", onKick)
+```
+
+### Per-handler — `b.Handle(..., m)`
+
+Passes one or more middleware functions as trailing arguments to `Handle`. They run only for that specific endpoint, after any group or global middleware.
+
+```go
+b.Handle("/secret", onSecret, middleware.Whitelist(ownerID))
+```
+
+---
+
+## Built-in Middleware
+
+### AutoRespond
+
+```go
+func AutoRespond() tele.MiddlewareFunc
+```
+
+Automatically calls `c.Respond()` for every update that contains a callback query. This prevents the Telegram client from showing a loading spinner indefinitely after a button press.
+
+```go
+b.Use(middleware.AutoRespond())
+
+b.Handle(&btn, func(c tele.Context) error {
+    // No need to call c.Respond() manually
+    return c.Edit("Done!")
+})
+```
+
+<Note>
+Without responding to a callback, Telegram shows a loading indicator on the button for up to 30 seconds. `AutoRespond` eliminates the need to call `c.Respond()` in every callback handler.
+</Note>
+
+---
+
+### IgnoreVia
+
+```go
+func IgnoreVia() tele.MiddlewareFunc
+```
+
+Skips any message that was sent via an inline bot (i.e., `message.Via != nil`). Useful when you want to ignore forwarded-style messages that appear in groups through inline bots.
+
+```go
+b.Use(middleware.IgnoreVia())
+```
+
+---
+
+### Recover
+
+```go
+func Recover(onError ...RecoverFunc) tele.MiddlewareFunc
+```
+
+Catches any `panic` that occurs inside a handler and converts it into an error. If no `onError` callback is supplied, it falls back to the bot's own `OnError` handler; if that is also unavailable, it logs to `log.Default()`.
+
+The recovered value must be either an `error` or a `string`; other panic values are silently discarded.
+
+```go
+// Use the bot's default OnError handler
+b.Use(middleware.Recover())
+
+// Use a custom recovery function
+b.Use(middleware.Recover(func(err error, c tele.Context) {
+    log.Printf("panic recovered: %v (update %d)", err, c.Update().ID)
+}))
+```
+
+<Tip>
+Place `Recover` as the first middleware in the chain so it wraps all subsequent middleware and handler logic.
+</Tip>
+
+---
+
+### Logger
+
+```go
+func Logger(logger ...*log.Logger) tele.MiddlewareFunc
+```
+
+Logs every incoming update as a JSON-indented object using `json.MarshalIndent`. If no `*log.Logger` is provided, `log.Default()` is used.
+
+The logged payload is the full `tele.Update` struct serialised to JSON, which includes all fields present in the incoming Telegram update.
+
+```go
+// Log to the default logger
+b.Use(middleware.Logger())
+
+// Log to a custom logger
+logger := log.New(os.Stdout, "[bot] ", log.LstdFlags)
+b.Use(middleware.Logger(logger))
+```
+
+---
+
+### Whitelist
+
+```go
+func Whitelist(chats ...int64) tele.MiddlewareFunc
+```
+
+Allows only updates whose sender ID is in the provided list. Updates from any other user are silently dropped (the handler returns `nil` without being called).
+
+```go
+b.Handle("/admin", onAdmin, middleware.Whitelist(adminID))
+
+// Or apply globally
+b.Use(middleware.Whitelist(user1, user2, user3))
+```
+
+---
+
+### Blacklist
+
+```go
+func Blacklist(chats ...int64) tele.MiddlewareFunc
+```
+
+Blocks updates whose sender ID is in the provided list. Updates from listed users are silently dropped; all other users pass through normally.
+
+```go
+b.Use(middleware.Blacklist(spammer1, spammer2))
+```
+
+---
+
+### Restrict
+
+```go
+func Restrict(v RestrictConfig) tele.MiddlewareFunc
+```
+
+The general-purpose restriction primitive that both `Whitelist` and `Blacklist` are built on. Checks whether the sender's ID appears in `RestrictConfig.Chats` and dispatches to different handlers accordingly.
+
+#### RestrictConfig
+
+```go
+type RestrictConfig struct {
+    // Chats is the list of chat/user IDs to match against.
+    Chats []int64
+
+    // In is called when the sender IS found in Chats.
+    // Defaults to the next handler if nil.
+    In tele.HandlerFunc
+
+    // Out is called when the sender is NOT found in Chats.
+    // Defaults to the next handler if nil.
+    Out tele.HandlerFunc
+}
+```
+
+```go
+// Allow admins to proceed, send a notice to everyone else
+b.Use(middleware.Restrict(middleware.RestrictConfig{
+    Chats: []int64{adminID},
+    In:    next, // proceed normally
+    Out: func(c tele.Context) error {
+        return c.Send("Access denied.")
+    },
+}))
+```
+
+---
+
+## Middleware Execution Order
+
+Middleware is applied in the order it is registered. When using `b.Use()` together with per-handler middleware, the global chain runs first:
+
+```
+Request → [global m1] → [global m2] → [handler m1] → handler
+```
+
+For groups, group-level middleware is prepended before per-handler middleware:
+
+```
+Request → [group m1] → [group m2] → [handler m1] → handler
+```

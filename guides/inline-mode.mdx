@@ -1,0 +1,253 @@
+---
+title: "Inline Mode"
+description: "Handle inline queries, build result types, and respond with QueryResponse."
+---
+
+Inline mode lets users invoke your bot from any chat by typing `@botname query`. Your bot receives the query, builds a list of results, and Telegram displays them as a gallery above the input field.
+
+## Enabling inline mode
+
+<Steps>
+  <Step title="Open @BotFather">
+    Send `/mybots`, select your bot, choose **Bot Settings**, then **Inline Mode**, and turn it on.
+  </Step>
+  <Step title="Register the OnQuery handler">
+    ```go
+    b.Handle(tele.OnQuery, func(c tele.Context) error {
+        // c.Query() returns the *tele.Query object
+        return handleInlineQuery(c)
+    })
+    ```
+  </Step>
+</Steps>
+
+## The Query object
+
+```go
+type Query struct {
+    ID       string    // Unique query ID — pass to Answer()
+    Sender   *User     // The user who sent the query
+    Location *Location // Present if bot requested user location
+    Text     string    // The query text (up to 512 characters)
+    Offset   string    // Pagination offset controlled by your bot
+    ChatType string    // Type of chat the query was sent from
+}
+```
+
+Access it through the context:
+
+```go
+b.Handle(tele.OnQuery, func(c tele.Context) error {
+    q := c.Query()
+    log.Printf("Query from %s: %q", q.Sender.Username, q.Text)
+    // ...
+})
+```
+
+## Building results
+
+Results are collected in a `tele.Results` slice. Every result embeds `ResultBase` which provides `SetResultID()`, `SetParseMode()`, `SetContent()`, and `SetReplyMarkup()`.
+
+### ArticleResult
+
+```go
+result := &tele.ArticleResult{
+    Title:       "Hello World",
+    Text:        "This is the message that will be sent.",
+    Description: "A short description shown in the list",
+    ThumbURL:    "https://example.com/thumb.jpg",
+}
+result.SetResultID("article-1")
+```
+
+### PhotoResult
+
+```go
+result := &tele.PhotoResult{
+    URL:      "https://example.com/photo.jpg",
+    ThumbURL: "https://example.com/photo_thumb.jpg",
+    Title:    "My Photo",
+    Caption:  "Look at this!",
+}
+```
+
+### VideoResult
+
+```go
+result := &tele.VideoResult{
+    URL:      "https://example.com/video.mp4",
+    MIME:     "video/mp4",
+    ThumbURL: "https://example.com/thumb.jpg",
+    Title:    "My Video",
+    Duration: 30,
+}
+```
+
+### AudioResult
+
+```go
+result := &tele.AudioResult{
+    URL:       "https://example.com/song.mp3",
+    Title:     "My Song",
+    Performer: "Artist Name",
+    Duration:  180,
+    Caption:   "Great track",
+}
+```
+
+### Other result types
+
+<CardGroup cols={2}>
+  <Card title="GifResult" icon="image">
+    An animated GIF. Provide `URL`, `ThumbURL`, optional `Width`/`Height`/`Duration`.
+  </Card>
+  <Card title="Mpeg4GifResult" icon="film">
+    An H.264 video without sound. Provide `URL`, optional `ThumbURL`.
+  </Card>
+  <Card title="DocumentResult" icon="file">
+    A PDF or ZIP file. MIME must be `application/pdf` or `application/zip`.
+  </Card>
+  <Card title="LocationResult" icon="location-dot">
+    Embeds a `tele.Location` (Lat/Lng) plus a `Title`.
+  </Card>
+  <Card title="VenueResult" icon="building">
+    A venue with `Location`, `Title`, `Address`, optional `FoursquareID`.
+  </Card>
+  <Card title="ContactResult" icon="address-card">
+    A phone contact with `PhoneNumber`, `FirstName`, optional `VCard`.
+  </Card>
+  <Card title="VoiceResult" icon="microphone">
+    An OGG voice recording at `URL` with a `Title`.
+  </Card>
+  <Card title="StickerResult" icon="face-smile">
+    A cached sticker by `Cache` (file ID).
+  </Card>
+</CardGroup>
+
+### Cached results
+
+If you have a `FileID` from a previous upload, use the `Cache` field to avoid re-uploading:
+
+```go
+result := &tele.PhotoResult{
+    Cache: "AgACAgIAAxk...", // existing FileID
+}
+```
+
+## Responding to queries
+
+Call `c.Answer()` with a `*tele.QueryResponse`:
+
+```go
+b.Handle(tele.OnQuery, func(c tele.Context) error {
+    q := c.Query()
+
+    article := &tele.ArticleResult{
+        Title: "Result for: " + q.Text,
+        Text:  "You searched for: " + q.Text,
+    }
+    article.SetResultID("1")
+
+    return c.Answer(&tele.QueryResponse{
+        Results:    tele.Results{article},
+        CacheTime:  60,    // seconds Telegram may cache the result
+        IsPersonal: true,  // do not share cache across users
+    })
+})
+```
+
+### QueryResponse fields
+
+```go
+type QueryResponse struct {
+    QueryID    string  // set automatically by Telebot
+    Results    Results
+    CacheTime  int
+    IsPersonal bool
+    NextOffset string  // pagination: pass to get more results
+    SwitchPMText      string // button to open private chat
+    SwitchPMParameter string // /start payload sent with the PM button
+    Button     *QueryResponseButton
+}
+```
+
+## Deep linking via SwitchPMText
+
+Add a button that opens a private chat with your bot (useful for login flows):
+
+```go
+return c.Answer(&tele.QueryResponse{
+    Results:           tele.Results{},
+    SwitchPMText:      "Log in to see results",
+    SwitchPMParameter: "login_prompt",
+})
+```
+
+When the user taps the button, Telegram sends `/start login_prompt` to your bot in a private chat. Handle it:
+
+```go
+b.Handle("/start", func(c tele.Context) error {
+    if c.Message().Payload == "login_prompt" {
+        return c.Send("Please complete login...")
+    }
+    return c.Send("Welcome!")
+})
+```
+
+## Handling chosen inline results
+
+Telegram can notify your bot when the user picks a result. Enable **Inline Feedback** in @BotFather, then handle `tele.OnInlineResult`:
+
+```go
+b.Handle(tele.OnInlineResult, func(c tele.Context) error {
+    result := c.InlineResult()
+    log.Printf("User %d chose result %s for query %q",
+        result.Sender.ID, result.ResultID, result.Query)
+
+    // result.MessageID is the inline_message_id — use it with b.Edit()
+    return nil
+})
+```
+
+## Full example
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+
+    tele "gopkg.in/telebot.v4"
+)
+
+func main() {
+    b, _ := tele.NewBot(tele.Settings{
+        Token:  "TOKEN",
+        Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+    })
+
+    b.Handle(tele.OnQuery, func(c tele.Context) error {
+        q := c.Query()
+
+        results := make(tele.Results, 3)
+        for i := 0; i < 3; i++ {
+            r := &tele.ArticleResult{
+                Title:       fmt.Sprintf("Result %d for '%s'", i+1, q.Text),
+                Text:        fmt.Sprintf("Item %d", i+1),
+                Description: "Tap to send",
+            }
+            r.SetResultID(fmt.Sprintf("%d", i))
+            results[i] = r
+        }
+
+        return c.Answer(&tele.QueryResponse{
+            Results:    results,
+            CacheTime:  30,
+            IsPersonal: true,
+        })
+    })
+
+    b.Start()
+}
+```

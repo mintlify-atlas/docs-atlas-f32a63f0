@@ -1,0 +1,222 @@
+---
+title: "Events"
+description: "All event endpoint constants and chat action constants for gopkg.in/telebot.v4."
+---
+
+Telebot exposes a set of string constants that represent the events your bot can react to. Pass them as the first argument to `b.Handle()`. All Telebot-provided endpoints start with the alert character `\a` to avoid collisions with command strings.
+
+```go
+b.Handle(tele.OnText, func(c tele.Context) error {
+    return c.Send("You wrote: " + c.Text())
+})
+```
+
+---
+
+## Message Events
+
+Triggered by incoming messages with specific content types.
+
+| Constant | Value | Triggered by |
+|---|---|---|
+| `OnText` | `"\atext"` | Any message containing plain text |
+| `OnForward` | `"\aforward"` | A forwarded message |
+| `OnReply` | `"\areply"` | A message that replies to another message |
+| `OnEdited` | `"\aedited"` | An edited (non-channel) message |
+| `OnPhoto` | `"\aphoto"` | A message containing a photo |
+| `OnAudio` | `"\aaudio"` | A message containing an audio file |
+| `OnAnimation` | `"\aanimation"` | A message containing a GIF or animation |
+| `OnDocument` | `"\adocument"` | A message containing a generic document |
+| `OnSticker` | `"\asticker"` | A message containing a sticker |
+| `OnVideo` | `"\avideo"` | A message containing a video |
+| `OnVoice` | `"\avoice"` | A message containing a voice note |
+| `OnVideoNote` | `"\avideo_note"` | A message containing a video note (circle) |
+| `OnContact` | `"\acontact"` | A message containing a shared contact |
+| `OnLocation` | `"\alocation"` | A message containing a location |
+| `OnVenue` | `"\avenue"` | A message containing a venue |
+| `OnDice` | `"\adice"` | A dice roll message |
+| `OnInvoice` | `"\ainvoice"` | A message containing an invoice |
+| `OnPayment` | `"\apayment"` | A successful payment notification |
+| `OnRefund` | `"\arefund"` | A refunded payment notification |
+| `OnGame` | `"\agame"` | A message containing a game |
+| `OnPoll` | `"\apoll"` | A message containing a poll |
+| `OnPollAnswer` | `"\apoll_answer"` | A user changed their answer in a non-anonymous poll |
+| `OnPinned` | `"\apinned"` | A message was pinned in the chat |
+| `OnChannelPost` | `"\achannel_post"` | A new post in a channel the bot monitors |
+| `OnEditedChannelPost` | `"\aedited_channel_post"` | An edited post in a monitored channel |
+
+```go
+b.Handle(tele.OnPhoto, func(c tele.Context) error {
+    return c.Send("Nice photo!")
+})
+
+b.Handle(tele.OnPollAnswer, func(c tele.Context) error {
+    answer := c.PollAnswer()
+    log.Printf("User %d voted: %v", answer.User.ID, answer.OptionIDs)
+    return nil
+})
+```
+
+---
+
+## Topic Events
+
+Triggered by forum topic lifecycle events in supergroups with topics enabled.
+
+| Constant | Value | Triggered by |
+|---|---|---|
+| `OnTopicCreated` | `"\atopic_created"` | A forum topic was created |
+| `OnTopicReopened` | `"\atopic_reopened"` | A closed forum topic was reopened |
+| `OnTopicClosed` | `"\atopic_closed"` | A forum topic was closed |
+| `OnTopicEdited` | `"\atopic_edited"` | A forum topic was edited |
+| `OnGeneralTopicHidden` | `"\ageneral_topic_hidden"` | The General topic was hidden |
+| `OnGeneralTopicUnhidden` | `"\ageneral_topic_unhidden"` | The General topic was unhidden |
+| `OnWriteAccessAllowed` | `"\awrite_access_allowed"` | A user was allowed to send messages to the bot |
+
+---
+
+## Member Events
+
+Triggered by membership and group metadata changes.
+
+| Constant | Value | Triggered by |
+|---|---|---|
+| `OnAddedToGroup` | `"\aadded_to_group"` | The bot was added to a group |
+| `OnUserJoined` | `"\auser_joined"` | A user or bot joined the chat |
+| `OnUserLeft` | `"\auser_left"` | A user or bot left the chat |
+| `OnUserShared` | `"\auser_shared"` | A user shared another user's profile |
+| `OnChatShared` | `"\achat_shared"` | A user shared a chat |
+| `OnNewGroupTitle` | `"\anew_chat_title"` | The group title was changed |
+| `OnNewGroupPhoto` | `"\anew_chat_photo"` | The group photo was changed |
+| `OnGroupPhotoDeleted` | `"\achat_photo_deleted"` | The group photo was deleted |
+| `OnGroupCreated` | `"\agroup_created"` | A new group chat was created |
+| `OnSuperGroupCreated` | `"\asupergroup_created"` | A new supergroup was created |
+| `OnChannelCreated` | `"\achannel_created"` | A new channel was created |
+| `OnMigration` | `"\amigration"` | A group was converted to a supergroup |
+
+<Note>
+`OnMigration` fires when a group switches to a supergroup. The chat ID changes during migration — update any stored references when this event occurs.
+</Note>
+
+---
+
+## Special Events
+
+Higher-level or cross-cutting events.
+
+| Constant | Value | Triggered by |
+|---|---|---|
+| `OnMedia` | `"\amedia"` | Any message with a media attachment |
+| `OnCallback` | `"\acallback"` | An inline keyboard button press |
+| `OnQuery` | `"\aquery"` | An inline query (typing `@botname …`) |
+| `OnInlineResult` | `"\ainline_result"` | A user chose an inline query result |
+| `OnShipping` | `"\ashipping_query"` | A shipping address was submitted for a flexible invoice |
+| `OnCheckout` | `"\apre_checkout_query"` | A pre-checkout query before payment |
+| `OnMyChatMember` | `"\amy_chat_member"` | The bot's own chat membership status changed |
+| `OnChatMember` | `"\achat_member"` | Another chat member's status changed |
+| `OnChatJoinRequest` | `"\achat_join_request"` | A user requested to join a chat |
+| `OnProximityAlert` | `"\aproximity_alert_triggered"` | A proximity alert was triggered |
+| `OnAutoDeleteTimer` | `"\amessage_auto_delete_timer_changed"` | The auto-delete timer setting was changed |
+| `OnWebApp` | `"\aweb_app"` | Data was sent from a Web App |
+
+```go
+b.Handle(tele.OnCallback, func(c tele.Context) error {
+    return c.Respond(&tele.CallbackResponse{
+        Text: "Button received!",
+    })
+})
+
+b.Handle(tele.OnQuery, func(c tele.Context) error {
+    return c.Answer(&tele.QueryResponse{
+        Results: tele.Results{
+            &tele.ArticleResult{
+                Title: c.Query().Text,
+                Text:  "You searched for: " + c.Query().Text,
+            },
+        },
+    })
+})
+```
+
+---
+
+## Video Chat Events
+
+Triggered by video chat lifecycle events within a group or channel.
+
+| Constant | Value | Triggered by |
+|---|---|---|
+| `OnVideoChatStarted` | `"\avideo_chat_started"` | A video chat was started |
+| `OnVideoChatEnded` | `"\avideo_chat_ended"` | A video chat ended |
+| `OnVideoChatParticipants` | `"\avideo_chat_participants_invited"` | New participants were invited to a video chat |
+| `OnVideoChatScheduled` | `"\avideo_chat_scheduled"` | A video chat was scheduled |
+
+---
+
+## Boost Events
+
+Triggered by channel or supergroup boost changes.
+
+| Constant | Value | Triggered by |
+|---|---|---|
+| `OnBoost` | `"\aboost_updated"` | A chat boost was added or changed |
+| `OnBoostRemoved` | `"\aboost_removed"` | A chat boost was removed |
+
+---
+
+## Business Events
+
+Triggered by Telegram Business account activity.
+
+| Constant | Value | Triggered by |
+|---|---|---|
+| `OnBusinessConnection` | `"\abusiness_connection"` | A business account connected or disconnected the bot |
+| `OnBusinessMessage` | `"\abusiness_message"` | A new message in a connected business account chat |
+| `OnEditedBusinessMessage` | `"\aedited_business_message"` | A message was edited in a connected business account chat |
+| `OnDeletedBusinessMessages` | `"\adeleted_business_messages"` | Messages were deleted from a connected business account chat |
+| `OnPurchasedPaidMedia` | `"\apurchased_paid_media"` | A user purchased paid media sent by the bot |
+
+```go
+b.Handle(tele.OnBusinessMessage, func(c tele.Context) error {
+    log.Printf("Business message from %d", c.Sender().ID)
+    return nil
+})
+```
+
+---
+
+## Chat Actions
+
+`ChatAction` is a `string` type used with `b.Notify()` to display a temporary status in the chat (e.g., "Bot is typing…"). Actions are visible to the recipient for up to 5 seconds or until the bot sends a message, whichever comes first.
+
+```go
+type ChatAction string
+```
+
+| Constant | Value | Displayed as |
+|---|---|---|
+| `Typing` | `"typing"` | Typing… |
+| `UploadingPhoto` | `"upload_photo"` | Sending photo… |
+| `UploadingVideo` | `"upload_video"` | Sending video… |
+| `UploadingAudio` | `"upload_audio"` | Sending audio… |
+| `UploadingDocument` | `"upload_document"` | Sending document… |
+| `UploadingVNote` | `"upload_video_note"` | Sending video note… |
+| `RecordingVideo` | `"record_video"` | Recording video… |
+| `RecordingAudio` | `"record_audio"` | Recording audio… |
+| `RecordingVNote` | `"record_video_note"` | Recording video note… |
+| `FindingLocation` | `"find_location"` | Finding location… |
+| `ChoosingSticker` | `"choose_sticker"` | Choosing sticker… |
+
+```go
+b.Handle(tele.OnText, func(c tele.Context) error {
+    // Show "typing" while processing
+    _ = b.Notify(c.Recipient(), tele.Typing)
+
+    result := expensiveOperation(c.Text())
+    return c.Send(result)
+})
+```
+
+<Tip>
+Call `b.Notify()` immediately before any operation that may take noticeable time. The action disappears automatically once the bot sends the next message.
+</Tip>

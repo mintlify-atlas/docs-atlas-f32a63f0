@@ -1,0 +1,221 @@
+---
+title: "Keyboards"
+description: "Build reply keyboards, inline keyboards, and handle button callbacks in Telebot."
+---
+
+Telebot's keyboard API is built around the `ReplyMarkup` struct. A single markup instance can carry either a reply keyboard (shown below the text input) or an inline keyboard (embedded inside a message).
+
+## ReplyMarkup
+
+```go
+type ReplyMarkup struct {
+    InlineKeyboard  [][]InlineButton
+    ReplyKeyboard   [][]ReplyButton
+    ForceReply      bool
+    ResizeKeyboard  bool
+    OneTimeKeyboard bool
+    RemoveKeyboard  bool
+    Selective       bool
+    Placeholder     string
+    IsPersistent    bool
+}
+```
+
+Create a new instance with `b.NewMarkup()` or directly with a struct literal:
+
+```go
+var menu = &tele.ReplyMarkup{ResizeKeyboard: true}
+// — or —
+menu := b.NewMarkup()
+```
+
+## Building reply keyboards
+
+Reply keyboards appear as a persistent button panel below the input field. Use `Btn` constructors on the markup, then assemble rows and call `.Reply()`.
+
+```go
+var menu = &tele.ReplyMarkup{ResizeKeyboard: true}
+
+btnContact  := menu.Contact("Share contact")
+btnLocation := menu.Location("Share location")
+btnText     := menu.Text("Just a label")
+btnPoll     := menu.Poll("Create poll", tele.PollQuiz)
+
+menu.Reply(
+    menu.Row(btnContact, btnLocation),
+    menu.Row(btnText),
+    menu.Row(btnPoll),
+)
+
+b.Handle("/menu", func(c tele.Context) error {
+    return c.Send("Choose:", menu)
+})
+```
+
+### Reply button types
+
+<CardGroup cols={2}>
+  <Card title=".Text(text)" icon="keyboard">
+    A plain-text button. Sends the label text as a message when tapped.
+  </Card>
+  <Card title=".Contact(text)" icon="phone">
+    Requests the user's phone number.
+  </Card>
+  <Card title=".Location(text)" icon="location-dot">
+    Requests the user's current location.
+  </Card>
+  <Card title=".Poll(text, pollType)" icon="chart-bar">
+    Lets the user create and send a poll. Pass `tele.PollQuiz` or `tele.PollRegular`.
+  </Card>
+</CardGroup>
+
+### Removing the keyboard
+
+Send `RemoveKeyboard: true` to dismiss the reply keyboard for the user:
+
+```go
+b.Handle("/done", func(c tele.Context) error {
+    return c.Send("Keyboard removed.", &tele.ReplyMarkup{RemoveKeyboard: true})
+})
+```
+
+Or use the shortcut option flag:
+
+```go
+return c.Send("Done!", tele.RemoveKeyboard)
+```
+
+## Building inline keyboards
+
+Inline keyboards are attached to individual messages. Use `.Data()`, `.URL()`, `.Query()`, `.QueryChat()`, or `.Login()` constructors, then call `.Inline()`.
+
+```go
+var inlineMenu = &tele.ReplyMarkup{}
+
+btnApprove := inlineMenu.Data("Approve", "approve", userID)
+btnDeny    := inlineMenu.Data("Deny",    "deny",    userID)
+btnVisit   := inlineMenu.URL("Visit site", "https://example.com")
+btnSearch  := inlineMenu.Query("Search", "default query")
+
+inlineMenu.Inline(
+    inlineMenu.Row(btnApprove, btnDeny),
+    inlineMenu.Row(btnVisit),
+    inlineMenu.Row(btnSearch),
+)
+```
+
+### Inline button types
+
+<CardGroup cols={2}>
+  <Card title=".Data(text, unique, data...)" icon="database">
+    Fires a callback. `unique` is the handler endpoint; optional `data` strings are joined by `|` and available as `c.Args()`.
+  </Card>
+  <Card title=".URL(text, url)" icon="link">
+    Opens a URL in the browser when tapped.
+  </Card>
+  <Card title=".Query(text, query)" icon="magnifying-glass">
+    Switches to inline mode with a pre-filled query in any chat.
+  </Card>
+  <Card title=".QueryChat(text, query)" icon="comments">
+    Switches to inline mode in the current chat.
+  </Card>
+  <Card title=".Login(text, login)" icon="right-to-bracket">
+    Opens Telegram Login Widget flow. Accepts a `*tele.Login` struct.
+  </Card>
+  <Card title=".WebApp(text, app)" icon="window-maximize">
+    Launches a Mini App. Accepts a `*tele.WebApp`.
+  </Card>
+</CardGroup>
+
+### The .Data() button and unique IDs
+
+The `unique` parameter doubles as the callback endpoint registered with `b.Handle()`:
+
+```go
+var selector = &tele.ReplyMarkup{}
+btnYes := selector.Data("Yes", "confirm_yes", "some_data")
+btnNo  := selector.Data("No",  "confirm_no")
+
+selector.Inline(selector.Row(btnYes, btnNo))
+
+// Register handlers using the button itself as the endpoint
+b.Handle(&btnYes, func(c tele.Context) error {
+    args := c.Args() // ["some_data"]
+    return c.Respond(&tele.CallbackResponse{Text: "Confirmed!"})
+})
+
+b.Handle(&btnNo, func(c tele.Context) error {
+    return c.Respond(&tele.CallbackResponse{Text: "Cancelled."})
+})
+```
+
+<Tip>
+Always `c.Respond()` in callback handlers — Telegram shows a loading spinner until a response is sent.
+</Tip>
+
+## Splitting buttons into rows
+
+Use `menu.Row(btns...)` for explicit row composition, or `menu.Split(n, btns)` to automatically chunk a slice into rows of `n` buttons:
+
+```go
+btns := []tele.Btn{
+    menu.Data("A", "a"), menu.Data("B", "b"),
+    menu.Data("C", "c"), menu.Data("D", "d"),
+    menu.Data("E", "e"), menu.Data("F", "f"),
+}
+
+// Creates [[A,B,C],[D,E,F]]
+menu.Inline(menu.Split(3, btns)...)
+```
+
+## Login buttons
+
+The `Login` button opens the Telegram Login Widget flow and can forward the user back to your site:
+
+```go
+loginBtn := menu.Login("Log in with Telegram", &tele.Login{
+    URL:         "https://example.com/auth",
+    Text:        "Login to Example",
+    Username:    "mybot",
+    WriteAccess: true,
+})
+```
+
+## Full inline keyboard example
+
+```go
+package main
+
+import (
+    "log"
+    "time"
+
+    tele "gopkg.in/telebot.v4"
+)
+
+func main() {
+    b, _ := tele.NewBot(tele.Settings{
+        Token:  "TOKEN",
+        Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+    })
+
+    var menu = &tele.ReplyMarkup{}
+    btnLike    := menu.Data("Like",    "like")
+    btnDislike := menu.Data("Dislike", "dislike")
+    menu.Inline(menu.Row(btnLike, btnDislike))
+
+    b.Handle("/post", func(c tele.Context) error {
+        return c.Send("How do you like this post?", menu)
+    })
+
+    b.Handle(&btnLike, func(c tele.Context) error {
+        return c.Respond(&tele.CallbackResponse{Text: "Thanks!"})
+    })
+
+    b.Handle(&btnDislike, func(c tele.Context) error {
+        return c.Respond(&tele.CallbackResponse{Text: "Sorry to hear that."})
+    })
+
+    log.Fatal(b.Start())
+}
+```

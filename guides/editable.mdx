@@ -1,0 +1,185 @@
+---
+title: "Editable Messages"
+description: "Edit, delete, and pin messages using the Editable interface and StoredMessage."
+---
+
+Telebot's editing API is built around the `Editable` interface. Any struct that returns a message ID and chat ID can be edited — including messages you retrieve from your database.
+
+## The Editable interface
+
+```go
+type Editable interface {
+    // MessageSig returns the message ID and chat ID.
+    // For inline messages, return chatID = 0.
+    MessageSig() (messageID string, chatID int64)
+}
+```
+
+Telebot uses these two values to construct `editMessageText`, `editMessageMedia`, and similar API calls. Any struct that provides them can be passed to `b.Edit()`, `b.Delete()`, `b.Pin()`, and `b.Unpin()`.
+
+## StoredMessage
+
+`StoredMessage` is a ready-to-use implementation suitable for storing in a database:
+
+```go
+type StoredMessage struct {
+    MessageID string `sql:"message_id" json:"message_id"`
+    ChatID    int64  `sql:"chat_id"    json:"chat_id"`
+}
+
+func (x StoredMessage) MessageSig() (string, int64) {
+    return x.MessageID, x.ChatID
+}
+```
+
+You can embed it into a larger model:
+
+```go
+type Post struct {
+    tele.StoredMessage
+    Title   string
+    Content string
+    SentAt  time.Time
+}
+```
+
+## Editing messages
+
+### b.Edit — text, media, or markup
+
+`b.Edit()` dispatches to the correct Telegram method based on the type of `what`:
+
+```go
+// Edit text
+b.Edit(msg, "Updated text")
+
+// Edit text with HTML
+b.Edit(msg, "<b>Updated</b> text", tele.ModeHTML)
+
+// Replace the inline keyboard
+b.Edit(msg, newMarkup)
+
+// Replace a photo
+b.Edit(msg, &tele.Photo{File: tele.FromDisk("new.jpg")})
+
+// Edit an inline message (from a callback)
+b.Edit(c.Callback(), "Updated inline message")
+```
+
+### b.EditCaption — media captions
+
+```go
+_, err := b.EditCaption(msg, "New caption for this image")
+
+// With parse mode
+_, err = b.EditCaption(msg, "<b>New</b> caption", tele.ModeHTML)
+```
+
+### b.EditReplyMarkup — inline keyboard only
+
+```go
+var newMenu = &tele.ReplyMarkup{}
+newMenu.Inline(newMenu.Row(
+    newMenu.Data("Refresh", "refresh"),
+))
+
+_, err := b.EditReplyMarkup(msg, newMenu)
+
+// Pass nil to remove the keyboard entirely
+_, err = b.EditReplyMarkup(msg, nil)
+```
+
+## Deleting messages
+
+```go
+err := b.Delete(msg)
+```
+
+<Warning>
+A message can only be deleted if it was sent **less than 48 hours ago**. For dice messages in private chats the window is reversed: they can only be deleted **more than 24 hours** after sending. The bot must have permission to delete messages in the chat.
+</Warning>
+
+Delete multiple messages at once:
+
+```go
+err := b.DeleteMany([]tele.Editable{msg1, msg2, msg3})
+```
+
+## Pinning and unpinning
+
+```go
+// Pin (supports tele.Silent to pin without notification)
+err := b.Pin(msg)
+err = b.Pin(msg, tele.Silent)
+
+// Unpin a specific message
+err = b.Unpin(chat, msgID)
+
+// Unpin all pinned messages
+err = b.UnpinAll(chat)
+```
+
+## Pattern: store, retrieve, edit
+
+A typical workflow in a bot that needs to update messages later:
+
+```go
+// 1. Send and store
+b.Handle("/post", func(c tele.Context) error {
+    msg, err := b.Send(c.Chat(), "Initial content")
+    if err != nil {
+        return err
+    }
+
+    stored := tele.StoredMessage{
+        MessageID: strconv.Itoa(msg.ID),
+        ChatID:    msg.Chat.ID,
+    }
+    db.Save(&stored) // persist to your DB
+    return nil
+})
+
+// 2. Retrieve and edit later (e.g. from a scheduled job)
+stored := db.GetStoredMessage(id)
+_, err := b.Edit(stored, "Updated content at " + time.Now().Format(time.Kitchen))
+```
+
+## Editing via Context
+
+When inside a callback handler, use the context shortcuts — they automatically resolve the correct message:
+
+```go
+b.Handle(&btnEdit, func(c tele.Context) error {
+    // Edits the message the button is attached to
+    return c.Edit("Edited via context!")
+})
+
+b.Handle(&btnCaption, func(c tele.Context) error {
+    return c.EditCaption("New caption")
+})
+
+// EditOrSend: edit if callback, send if not
+b.Handle("/update", func(c tele.Context) error {
+    return c.EditOrSend("Hello from /update")
+})
+```
+
+## Custom Editable
+
+Implement `Editable` on any struct:
+
+```go
+type MyMessage struct {
+    ID     string
+    ChatID int64
+    // ... other fields
+}
+
+func (m *MyMessage) MessageSig() (string, int64) {
+    return m.ID, m.ChatID
+}
+
+// Now usable everywhere Editable is accepted
+b.Edit(&myMsg, "Updated!")
+b.Delete(&myMsg)
+```

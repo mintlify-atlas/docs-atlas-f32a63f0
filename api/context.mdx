@@ -1,0 +1,462 @@
+---
+title: "Context"
+description: "Reference for the Context interface, HandlerFunc type, and NewContext constructor."
+---
+
+The `Context` interface wraps an incoming `Update` and exposes the full set of accessors and actions your handler needs. Every handler function receives exactly one `Context` argument.
+
+## HandlerFunc
+
+```go
+type HandlerFunc func(Context) error
+```
+
+All bot handlers must match this signature. Returning a non-nil error causes the bot to call `b.OnError`.
+
+## NewContext
+
+```go
+func NewContext(b API, u Update) Context
+```
+
+Constructs a new `Context` backed by the given bot API and update. Useful for testing or when manually dispatching updates.
+
+<ParamField path="b" type="API">
+  The bot instance (implements `API`).
+</ParamField>
+
+<ParamField path="u" type="Update">
+  The update to wrap.
+</ParamField>
+
+---
+
+## Update Accessors
+
+Methods that surface the raw update payload.
+
+### Bot
+
+```go
+Bot() API
+```
+
+Returns the bot instance associated with the context.
+
+### Update
+
+```go
+Update() Update
+```
+
+Returns the original `Update` struct.
+
+### Message
+
+```go
+Message() *Message
+```
+
+Returns the message for the current event. Inspects multiple fields in order:
+
+1. `Update.Message`
+2. `Update.Callback.Message` (for callback queries)
+3. `Update.EditedMessage`
+4. `Update.ChannelPost` (or its `PinnedMessage`)
+5. `Update.EditedChannelPost`
+
+Returns `nil` if none are present.
+
+### Callback
+
+```go
+Callback() *Callback
+```
+
+Returns `Update.Callback`, or `nil`.
+
+### Query
+
+```go
+Query() *Query
+```
+
+Returns `Update.Query` (inline query), or `nil`.
+
+### InlineResult
+
+```go
+InlineResult() *InlineResult
+```
+
+Returns `Update.InlineResult`, or `nil`.
+
+### ShippingQuery
+
+```go
+ShippingQuery() *ShippingQuery
+```
+
+Returns `Update.ShippingQuery`, or `nil`.
+
+### PreCheckoutQuery
+
+```go
+PreCheckoutQuery() *PreCheckoutQuery
+```
+
+Returns `Update.PreCheckoutQuery`, or `nil`.
+
+### Payment
+
+```go
+Payment() *Payment
+```
+
+Returns `Update.Message.Payment`, or `nil` if there is no message.
+
+### Poll
+
+```go
+Poll() *Poll
+```
+
+Returns `Update.Poll`, or `nil`.
+
+### PollAnswer
+
+```go
+PollAnswer() *PollAnswer
+```
+
+Returns `Update.PollAnswer`, or `nil`.
+
+### ChatMember
+
+```go
+ChatMember() *ChatMemberUpdate
+```
+
+Returns `Update.ChatMember` if present, falling back to `Update.MyChatMember`.
+
+### ChatJoinRequest
+
+```go
+ChatJoinRequest() *ChatJoinRequest
+```
+
+Returns `Update.ChatJoinRequest`, or `nil`.
+
+### Topic
+
+```go
+Topic() *Topic
+```
+
+Returns the topic change from the current message. Inspects `TopicCreated`, `TopicReopened`, and `TopicEdited` in that order.
+
+### Boost
+
+```go
+Boost() *BoostUpdated
+```
+
+Returns `Update.Boost`, or `nil`.
+
+### BoostRemoved
+
+```go
+BoostRemoved() *BoostRemoved
+```
+
+Returns `Update.BoostRemoved`, or `nil`.
+
+### PurchasedPaidMedia
+
+```go
+PurchasedPaidMedia() *PaidMediaPurchased
+```
+
+Returns `Update.PurchasedPaidMedia`, or `nil`.
+
+### Migration
+
+```go
+Migration() (int64, int64)
+```
+
+Returns `(migrateFrom, migrateTo)` chat IDs for group→supergroup migrations. Both values are taken from `Update.Message`. Returns `(0, 0)` if the message is absent.
+
+---
+
+## Convenience Accessors
+
+Higher-level helpers that unify several update types into a single call.
+
+### Sender
+
+```go
+Sender() *User
+```
+
+Returns the acting user for the current event. Checks callback, message, inline query, inline result, shipping query, pre-checkout query, poll answer, chat member updates, join requests, and boost events in order. Returns `nil` if no user is found.
+
+### Chat
+
+```go
+Chat() *Chat
+```
+
+Returns the current chat. Derived from the message or chat-member update. Returns `nil` if unavailable.
+
+### Recipient
+
+```go
+Recipient() Recipient
+```
+
+Combines `Chat()` and `Sender()`: returns the chat if present, otherwise the sender. Useful when you want to reply to either a private user or a group without special-casing.
+
+### Text
+
+```go
+Text() string
+```
+
+Returns the message text. If the message has a caption (e.g. a photo), the caption is returned. Returns an empty string when there is no message.
+
+### ThreadID
+
+```go
+ThreadID() int
+```
+
+Returns `Message.ThreadID` (forum thread), or `0`.
+
+### Entities
+
+```go
+Entities() Entities
+```
+
+Returns the message entities. Prefers `CaptionEntities` when present, otherwise returns `Entities`. Returns `nil` when there is no message.
+
+### Data
+
+```go
+Data() string
+```
+
+Returns context-sensitive data:
+
+| Update type | Returned value |
+|---|---|
+| Message with payment | `Payment.Payload` |
+| Plain message | `Message.Payload` (command arguments) |
+| Callback | `Callback.Data` |
+| Inline query | `Query.Text` |
+| Inline result | `InlineResult.Query` |
+| Shipping query | `ShippingQuery.Payload` |
+| Pre-checkout query | `PreCheckoutQuery.Payload` |
+
+### Args
+
+```go
+Args() []string
+```
+
+Returns command or callback arguments as a string slice:
+
+- Message commands: payload split by whitespace
+- Payment messages: payload split by `|`
+- Callbacks: `Callback.Data` split by `|`
+- Inline queries / results: query text split by space
+
+---
+
+## Action Methods
+
+### Send
+
+```go
+Send(what interface{}, opts ...interface{}) error
+```
+
+Sends `what` to the current recipient. Thread-aware: automatically injects `ThreadID` unless `IgnoreThread` is passed.
+
+### SendAlbum
+
+```go
+SendAlbum(a Album, opts ...interface{}) error
+```
+
+Sends a media album to the current recipient.
+
+### Reply
+
+```go
+Reply(what interface{}, opts ...interface{}) error
+```
+
+Replies to the current message. Returns `ErrBadContext` if there is no message in context.
+
+### Forward
+
+```go
+Forward(msg Editable, opts ...interface{}) error
+```
+
+Forwards `msg` to the current recipient.
+
+### ForwardTo
+
+```go
+ForwardTo(to Recipient, opts ...interface{}) error
+```
+
+Forwards the current message to `to`. Returns `ErrBadContext` if there is no message in context.
+
+### Edit
+
+```go
+Edit(what interface{}, opts ...interface{}) error
+```
+
+Edits the current message. Works for callback and inline-result contexts. Returns `ErrBadContext` otherwise.
+
+### EditCaption
+
+```go
+EditCaption(caption string, opts ...interface{}) error
+```
+
+Edits the caption of the current message. Works for callback and inline-result contexts.
+
+### EditOrSend
+
+```go
+EditOrSend(what interface{}, opts ...interface{}) error
+```
+
+Attempts to edit the current message. Falls back to `Send` on `ErrBadContext`.
+
+### EditOrReply
+
+```go
+EditOrReply(what interface{}, opts ...interface{}) error
+```
+
+Attempts to edit the current message. Falls back to `Reply` on `ErrBadContext`.
+
+### Delete
+
+```go
+Delete() error
+```
+
+Deletes the current message. Returns `ErrBadContext` if there is no message.
+
+### DeleteAfter
+
+```go
+DeleteAfter(d time.Duration) *time.Timer
+```
+
+Schedules deletion of the current message after duration `d`. The returned `*time.Timer` can be cancelled with its `Stop` method. Errors are forwarded to `b.OnError`.
+
+### Notify
+
+```go
+Notify(action ChatAction) error
+```
+
+Sends a chat action (e.g. `Typing`, `UploadingPhoto`) to the current recipient.
+
+### Respond
+
+```go
+Respond(resp ...*CallbackResponse) error
+```
+
+Sends a response to the current callback query. Returns an error if `Update.Callback` is nil.
+
+### RespondText
+
+```go
+RespondText(text string) error
+```
+
+Sends a toast-style popup response to the current callback query.
+
+### RespondAlert
+
+```go
+RespondAlert(text string) error
+```
+
+Sends an alert dialog response to the current callback query.
+
+### Answer
+
+```go
+Answer(resp *QueryResponse) error
+```
+
+Sends results for the current inline query. Returns an error if `Update.Query` is nil.
+
+### Ship
+
+```go
+Ship(what ...interface{}) error
+```
+
+Replies to the current shipping query. Returns an error if `Update.ShippingQuery` is nil.
+
+### Accept
+
+```go
+Accept(errorMessage ...string) error
+```
+
+Finalizes the current pre-checkout query (payment confirmation). Returns an error if `Update.PreCheckoutQuery` is nil.
+
+---
+
+## State
+
+### Get
+
+```go
+Get(key string) interface{}
+```
+
+Retrieves a value stored in the context's key-value store. Returns `nil` if the key does not exist. Thread-safe.
+
+### Set
+
+```go
+Set(key string, val interface{})
+```
+
+Stores `val` under `key` in the context's key-value store. Thread-safe.
+
+<Note>
+  The context store is local to a single update — data does not persist across requests. Use a database or the bot's state management for persistence.
+</Note>
+
+---
+
+## Option Flags
+
+Option flags can be passed to `Send`, `Reply`, and other action methods as shorthand for `SendOptions` fields.
+
+| Constant | Effect |
+|---|---|
+| `NoPreview` | Disable web page link preview |
+| `Silent` | Send without notification sound |
+| `AllowWithoutReply` | Send even if the replied-to message is deleted |
+| `Protected` | Protect message content from forwarding/saving |
+| `ForceReply` | Request a reply interface from the user |
+| `OneTimeKeyboard` | Hide reply keyboard after one use |
+| `RemoveKeyboard` | Remove the reply keyboard |
+| `IgnoreThread` | Do not inherit thread ID from context |

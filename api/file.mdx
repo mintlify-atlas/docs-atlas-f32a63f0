@@ -1,0 +1,134 @@
+---
+title: "File"
+description: "The File type and constructors for local, URL-based, and reader-based files."
+---
+
+## Overview
+
+`File` is an embeddable struct that represents any file Telebot can send. When you attach a `File` to a media type (e.g. `&tele.Photo{File: ...}`), Telebot handles uploading, caching, and reuse automatically.
+
+```go
+type File struct {
+    FileID     string    `json:"file_id"`
+    UniqueID   string    `json:"file_unique_id"`
+    FileSize   int64     `json:"file_size"`
+    FilePath   string    `json:"file_path"`   // path on Telegram servers
+    FileLocal  string    `json:"file_local"`  // local filesystem path
+    FileURL    string    `json:"file_url"`    // remote URL
+    FileReader io.Reader `json:"-"`           // io.Reader source
+}
+```
+
+## Constructors
+
+### FromDisk
+
+```go
+func FromDisk(filename string) File
+```
+
+Creates a `File` backed by a local file on disk.
+
+```go
+photo := &tele.Photo{File: tele.FromDisk("image.jpg")}
+b.Send(user, photo)
+```
+
+### FromURL
+
+```go
+func FromURL(url string) File
+```
+
+Creates a `File` backed by a remote HTTP(S) URL. Telegram will fetch the file directly.
+
+```go
+photo := &tele.Photo{File: tele.FromURL("https://example.com/image.jpg")}
+b.Send(user, photo)
+```
+
+### FromReader
+
+```go
+func FromReader(reader io.Reader) File
+```
+
+Creates a `File` backed by an `io.Reader`. Useful for in-memory files or streaming uploads.
+
+```go
+data, _ := os.ReadFile("report.pdf")
+doc := &tele.Document{File: tele.FromReader(bytes.NewReader(data))}
+b.Send(user, doc)
+```
+
+## Methods
+
+### InCloud
+
+```go
+func (f *File) InCloud() bool
+```
+
+Reports whether the file has been uploaded to Telegram and has a valid `FileID`. Returns `true` once the file has been sent at least once.
+
+### OnDisk
+
+```go
+func (f *File) OnDisk() bool
+```
+
+Reports whether `FileLocal` points to an existing file on the local filesystem. Uses `os.Stat` internally.
+
+## File caching
+
+Telebot automatically caches the `FileID` after the first upload. On subsequent sends of the same media object, it reuses the `FileID` without re-uploading:
+
+```go
+audio := &tele.Audio{File: tele.FromDisk("song.ogg")}
+
+fmt.Println(audio.OnDisk())   // true
+fmt.Println(audio.InCloud())  // false
+
+b.Send(user1, audio)
+// Telebot uploads the file and stores the returned FileID in audio.FileID
+
+fmt.Println(audio.InCloud())  // true
+fmt.Println(audio.FileID)     // <Telegram file ID>
+
+b.Send(user2, audio)
+// Telebot reuses audio.FileID — no re-upload
+```
+
+<Tip>
+To persist a file reference across bot restarts, save the `FileID` string to your database. You can reconstruct a sendable file with just the ID by setting `File.FileID` directly.
+</Tip>
+
+## Downloading files
+
+Use `b.FileByID()` to get a `File` with a populated `FilePath`, then `b.Download()` to save it locally:
+
+```go
+b.Handle(tele.OnDocument, func(c tele.Context) error {
+    doc := c.Message().Document
+    file, err := b.FileByID(doc.FileID)
+    if err != nil {
+        return err
+    }
+    return b.Download(&file, "downloaded_file")
+})
+```
+
+## Media types that embed File
+
+All media types embed `File`:
+
+| Type | Description |
+|------|-------------|
+| `Photo` | JPEG image |
+| `Audio` | MP3 or other audio |
+| `Video` | MP4 or other video |
+| `Document` | Any file type |
+| `Voice` | OGG voice message |
+| `VideoNote` | Round video note |
+| `Animation` | GIF or MP4 animation |
+| `Sticker` | WebP or animated sticker |

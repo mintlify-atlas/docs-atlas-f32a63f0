@@ -1,0 +1,225 @@
+---
+title: "Settings"
+description: "Configuration struct passed to NewBot to create a Bot instance."
+---
+
+`Settings` is the configuration object passed to `NewBot`. Every field is optional except `Token`.
+
+```go
+type Settings struct {
+    URL         string
+    Token       string
+    Updates     int
+    Poller      Poller
+    Synchronous bool
+    Verbose     bool
+    ParseMode   ParseMode
+    OnError     func(error, Context)
+    Client      *http.Client
+    Offline     bool
+}
+```
+
+---
+
+## Fields
+
+<ParamField path="Token" type="string" required>
+  The Telegram Bot API token issued by [@BotFather](https://t.me/BotFather). This is the only required field.
+
+  ```
+  Token: "1234567890:AABBCC..."
+  ```
+</ParamField>
+
+<ParamField path="URL" type="string">
+  Base URL of the Telegram Bot API server. Defaults to `https://api.telegram.org` when empty.
+
+  Override this to use a local Bot API server:
+
+  ```go
+  URL: "http://localhost:8081"
+  ```
+</ParamField>
+
+<ParamField path="Updates" type="int">
+  Buffer capacity of the internal `Updates` channel. Defaults to `100` when zero.
+
+  Increase this if your bot receives bursts of updates faster than handlers can process them.
+
+  ```go
+  Updates: 256
+  ```
+</ParamField>
+
+<ParamField path="Poller" type="Poller">
+  The update provider used by `b.Start()`. Defaults to `&LongPoller{}` when nil.
+
+  Telebot ships two built-in pollers:
+
+  | Type | Description |
+  |---|---|
+  | `*LongPoller` | Classic long-polling. Configure `Timeout`, `Limit`, and `AllowedUpdates`. |
+  | `*Webhook` | Receives updates via an HTTPS webhook endpoint. |
+
+  ```go
+  Poller: &tele.LongPoller{Timeout: 10 * time.Second}
+  ```
+</ParamField>
+
+<ParamField path="Synchronous" type="bool">
+  When `true`, handlers run sequentially in the same goroutine as the update loop. `ProcessUpdate` returns only after the handler finishes.
+
+  When `false` (the default), each handler is launched in its own goroutine.
+
+  ```go
+  Synchronous: true // useful for testing or ordered processing
+  ```
+</ParamField>
+
+<ParamField path="Verbose" type="bool">
+  When `true`, every outgoing API request is logged via the error handler. Use only for debugging — the output is verbose.
+
+  ```go
+  Verbose: true
+  ```
+</ParamField>
+
+<ParamField path="ParseMode" type="ParseMode">
+  Default parse mode attached to every `Send`, `Edit`, and similar call. Can be overridden per-message by passing a `ParseMode` in `opts`.
+
+  See [ParseMode constants](#parsemode-constants) below.
+
+  ```go
+  ParseMode: tele.ModeHTML
+  ```
+</ParamField>
+
+<ParamField path="OnError" type="func(error, Context)">
+  Callback invoked whenever a handler returns an error, or when an internal error occurs. The `Context` argument may be `nil` for non-handler errors.
+
+  Defaults to `log.Println(update.ID, err)` when nil.
+
+  ```go
+  OnError: func(err error, c tele.Context) {
+      if c != nil {
+          log.Printf("update %d: %v", c.Update().ID, err)
+      } else {
+          log.Println(err)
+      }
+  }
+  ```
+</ParamField>
+
+<ParamField path="Client" type="*http.Client">
+  HTTP client used for all Telegram API requests. Defaults to `&http.Client{Timeout: time.Minute}` when nil.
+
+  Override to set custom timeouts, a proxy, or transport-level settings:
+
+  ```go
+  Client: &http.Client{
+      Timeout: 30 * time.Second,
+      Transport: myTransport,
+  }
+  ```
+</ParamField>
+
+<ParamField path="Offline" type="bool">
+  When `true`, `NewBot` skips the initial `getMe` call and sets `b.Me` to an empty `&User{}`. No network access occurs during construction.
+
+  Intended for unit testing or environments without internet access.
+
+  ```go
+  Offline: true
+  ```
+</ParamField>
+
+---
+
+## ParseMode Constants
+
+`ParseMode` is a type alias for `string`. The following constants are defined:
+
+| Constant | Value | Description |
+|---|---|---|
+| `tele.ModeDefault` | `""` | No parse mode. Message text is sent as-is. |
+| `tele.ModeMarkdown` | `"Markdown"` | Legacy Markdown (Telegram v1). Limited entity support. |
+| `tele.ModeMarkdownV2` | `"MarkdownV2"` | Updated Markdown with stricter escaping rules. |
+| `tele.ModeHTML` | `"HTML"` | HTML subset: `<b>`, `<i>`, `<u>`, `<s>`, `<code>`, `<pre>`, `<a>`. |
+
+<Tip>
+  `ModeHTML` is generally the most predictable choice. `ModeMarkdownV2` requires escaping many special characters (`.`, `!`, `(`, `)`, etc.) which can be error-prone.
+</Tip>
+
+---
+
+## Example: Fully Configured Settings
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "os"
+    "time"
+
+    tele "gopkg.in/telebot.v4"
+)
+
+func main() {
+    b, err := tele.NewBot(tele.Settings{
+        Token: os.Getenv("BOT_TOKEN"),
+        URL:   "https://api.telegram.org", // default; omit in production
+
+        Poller: &tele.LongPoller{
+            Timeout: 10 * time.Second,
+            Limit:   100,
+        },
+
+        Updates: 256,
+
+        ParseMode:   tele.ModeHTML,
+        Synchronous: false,
+        Verbose:     false,
+
+        Client: &http.Client{
+            Timeout: 30 * time.Second,
+        },
+
+        OnError: func(err error, c tele.Context) {
+            if c != nil {
+                log.Printf("[update:%d] %v", c.Update().ID, err)
+            } else {
+                log.Println(err)
+            }
+        },
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    b.Handle("/start", func(c tele.Context) error {
+        return c.Send("<b>Hello!</b>")
+    })
+
+    b.Start()
+}
+```
+
+---
+
+## Minimal Settings
+
+Only `Token` and `Poller` are needed for a working bot:
+
+```go
+b, err := tele.NewBot(tele.Settings{
+    Token:  os.Getenv("BOT_TOKEN"),
+    Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+})
+```
+
+<Note>
+  If `Poller` is omitted, `NewBot` will set it to `&LongPoller{}` (with zero timeout), which still works but polls as fast as the API allows. Always set an appropriate `Timeout`.
+</Note>

@@ -1,0 +1,201 @@
+---
+title: "Webhooks"
+description: "Replace long polling with a webhook server, configure TLS, and use ProcessUpdate for custom routing."
+---
+
+By default Telebot uses long polling (`LongPoller`) to fetch updates. Webhooks let Telegram push updates directly to your server, which is more efficient in production.
+
+## Long polling vs webhooks
+
+| | Long Polling | Webhook |
+|---|---|---|
+| Setup | Zero config | Requires a public HTTPS URL |
+| Latency | ~100 ms round-trip | Near-instant push |
+| Suitable for | Development, low traffic | Production, high traffic |
+| Horizontal scaling | Single instance | Multiple instances behind a load balancer |
+
+## The Webhook struct
+
+```go
+type Webhook struct {
+    Listen         string   // address to bind, e.g. "0.0.0.0:8443"
+    MaxConnections int      // max simultaneous connections (1-100)
+    AllowedUpdates []string // filter update types; empty = all
+    IP             string   // fixed IP for Telegram to connect to
+    DropUpdates    bool     // discard pending updates on startup
+    SecretToken    string   // verify X-Telegram-Bot-Api-Secret-Token header
+    IgnoreSetWebhook bool   // skip the setWebhook API call
+
+    TLS      *WebhookTLS      // local TLS configuration
+    Endpoint *WebhookEndpoint // public URL / cert for Telegram
+}
+```
+
+## Basic setup with a trusted certificate
+
+If your server uses a certificate from a trusted CA (Let's Encrypt, etc.), only the public URL is needed:
+
+```go
+b, _ := tele.NewBot(tele.Settings{
+    Token: "TOKEN",
+    Poller: &tele.Webhook{
+        Listen: "0.0.0.0:443",
+        TLS: &tele.WebhookTLS{
+            Cert: "/etc/letsencrypt/live/example.com/fullchain.pem",
+            Key:  "/etc/letsencrypt/live/example.com/privkey.pem",
+        },
+        Endpoint: &tele.WebhookEndpoint{
+            PublicURL: "https://example.com/",
+        },
+    },
+})
+
+b.Start()
+```
+
+When the poller starts it automatically calls `b.SetWebhook()` and then begins serving HTTP requests.
+
+## Setup with a self-signed certificate
+
+For self-signed certificates, provide the `.pem` file in both `TLS` and `Endpoint.Cert` so Telegram can trust it:
+
+```go
+poller := &tele.Webhook{
+    Listen: "0.0.0.0:8443",
+    TLS: &tele.WebhookTLS{
+        Cert: "webhook.pem",
+        Key:  "webhook.key",
+    },
+    Endpoint: &tele.WebhookEndpoint{
+        PublicURL: "https://203.0.113.5:8443/",
+        Cert:      "webhook.pem", // uploaded to Telegram
+    },
+}
+
+b, _ := tele.NewBot(tele.Settings{
+    Token:  "TOKEN",
+    Poller: poller,
+})
+
+b.Start()
+```
+
+<Note>
+Telegram supports webhooks on ports **443**, **80**, **88**, and **8443** only.
+</Note>
+
+## Behind a reverse proxy
+
+When a load balancer or reverse proxy (nginx, Caddy, etc.) handles TLS, leave `TLS` empty and only set `Endpoint`:
+
+```go
+poller := &tele.Webhook{
+    Listen: "127.0.0.1:8080", // bind to localhost; proxy forwards here
+    Endpoint: &tele.WebhookEndpoint{
+        PublicURL: "https://bot.example.com/webhook",
+        // Cert left empty — public cert, no upload needed
+    },
+}
+```
+
+## Integrating into an existing HTTP server
+
+Leave `Listen` empty to prevent Telebot from starting its own server. Then pass the webhook handler to your mux:
+
+```go
+webhook := &tele.Webhook{
+    // Listen is empty — no server started
+    Endpoint: &tele.WebhookEndpoint{
+        PublicURL: "https://example.com/telegram",
+    },
+}
+
+b, _ := tele.NewBot(tele.Settings{
+    Token:  "TOKEN",
+    Poller: webhook,
+})
+
+// The Webhook implements http.Handler
+http.Handle("/telegram", webhook)
+http.ListenAndServeTLS(":443", "cert.pem", "key.pem", nil)
+```
+
+## Securing with SecretToken
+
+Set `SecretToken` to have Telebot reject requests that do not include the matching `X-Telegram-Bot-Api-Secret-Token` header:
+
+```go
+poller := &tele.Webhook{
+    Listen:      "0.0.0.0:8443",
+    SecretToken: "my-very-secret-token-123",
+    // ...
+}
+```
+
+Telegram will include this header on every webhook request automatically after you call `SetWebhook`.
+
+## Managing the webhook
+
+```go
+// Register or update the webhook manually
+err := b.SetWebhook(webhook)
+
+// Get current webhook status
+info, err := b.Webhook()
+fmt.Println(info.PendingUpdates, info.ErrorMessage)
+
+// Remove the webhook (switches back to long polling)
+err = b.RemoveWebhook()
+
+// Remove and drop all pending updates
+err = b.RemoveWebhook(true)
+```
+
+## Processing updates manually
+
+If you need full control over how updates are dispatched — for example in a serverless function — use `b.ProcessUpdate()` directly:
+
+```go
+func lambdaHandler(body []byte) error {
+    var update tele.Update
+    if err := json.Unmarshal(body, &update); err != nil {
+        return err
+    }
+    b.ProcessUpdate(update)
+    return nil
+}
+```
+
+`ProcessUpdate` is also useful for testing: inject synthetic updates without a live Telegram connection.
+
+## Filtering update types
+
+Reduce unnecessary traffic by telling Telegram which update types to send:
+
+```go
+poller := &tele.Webhook{
+    Listen: "0.0.0.0:443",
+    AllowedUpdates: []string{
+        "message",
+        "callback_query",
+        "inline_query",
+    },
+    // ...
+}
+```
+
+## DropUpdates on startup
+
+Set `DropUpdates: true` to discard any updates queued while the bot was offline:
+
+```go
+poller := &tele.Webhook{
+    Listen:      "0.0.0.0:8443",
+    DropUpdates: true,
+    // ...
+}
+```
+
+<Tip>
+For bots that react to real-time events (like live support), dropping stale updates prevents handlers from processing outdated messages after a restart.
+</Tip>

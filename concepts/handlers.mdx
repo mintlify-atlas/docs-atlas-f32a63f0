@@ -1,0 +1,230 @@
+---
+title: "Handlers"
+description: "Registering handlers with b.Handle(), supported endpoint types, and the full list of built-in event constants."
+---
+
+Handlers are the core of your bot's logic. You map an *endpoint* (a command string, an event constant, or a button reference) to a `HandlerFunc`, and Telebot calls that function whenever a matching update arrives.
+
+## HandlerFunc
+
+```go
+// HandlerFunc represents a handler function, which is
+// used to handle actual endpoints.
+type HandlerFunc func(Context) error
+```
+
+Return `nil` on success. Return a non-nil error to invoke the bot's `OnError` callback.
+
+## b.Handle
+
+```go
+// Handle lets you set the handler for some command name or
+// one of the supported endpoints. It also applies middleware
+// if such passed to the function.
+func (b *Bot) Handle(endpoint interface{}, h HandlerFunc, m ...MiddlewareFunc)
+```
+
+<ParamField path="endpoint" type="interface{}" required>
+  What triggers this handler. See [Endpoint types](#endpoint-types) below.
+</ParamField>
+
+<ParamField path="h" type="HandlerFunc" required>
+  The function to call when the endpoint matches.
+</ParamField>
+
+<ParamField path="m" type="...MiddlewareFunc">
+  Optional per-handler middleware applied only to this endpoint. Combined with any group-level middleware.
+</ParamField>
+
+<Warning>
+  `Handle` panics with `"telebot: unsupported endpoint"` if the endpoint value cannot be converted to a string key. Always pass a string literal, an event constant, or a pointer to a `Btn` / `InlineButton`.
+</Warning>
+
+## Endpoint types
+
+### String commands
+
+Any string starting with `/` is treated as a bot command:
+
+```go
+b.Handle("/start", func(c tele.Context) error {
+    return c.Send("Welcome!")
+})
+
+b.Handle("/help", onHelp)
+```
+
+Telebot strips the `@botname` suffix automatically and only matches commands directed at your bot.
+
+### Arbitrary text
+
+You can match exact message text:
+
+```go
+b.Handle("ping", func(c tele.Context) error {
+    return c.Send("pong")
+})
+```
+
+### Event constants
+
+All built-in event constants begin with `\a` (alert character) to prevent collisions with user text:
+
+```go
+b.Handle(tele.OnText, func(c tele.Context) error {
+    return c.Reply("Got your message: " + c.Text())
+})
+
+b.Handle(tele.OnPhoto, func(c tele.Context) error {
+    return c.Reply("Nice photo!")
+})
+```
+
+### Button and markup references
+
+Pass a pointer to an `InlineButton` or `Btn` to bind a callback handler directly to that button:
+
+```go
+menu := &tele.ReplyMarkup{}
+btnHelp := menu.Text("Help")
+btnSettings := menu.Text("Settings")
+menu.Reply(menu.Row(btnHelp, btnSettings))
+
+b.Handle(&btnHelp, func(c tele.Context) error {
+    return c.Send("Here is the help text.")
+})
+```
+
+## Full event constant reference
+
+### Messages
+
+| Constant | Triggers on |
+|---|---|
+| `tele.OnText` | Any text message |
+| `tele.OnForward` | Forwarded message |
+| `tele.OnReply` | Reply to a message |
+| `tele.OnEdited` | Edited message |
+| `tele.OnMedia` | Any media message |
+| `tele.OnPhoto` | Photo |
+| `tele.OnAudio` | Audio file |
+| `tele.OnAnimation` | GIF / animation |
+| `tele.OnDocument` | Document / file |
+| `tele.OnSticker` | Sticker |
+| `tele.OnVideo` | Video |
+| `tele.OnVoice` | Voice message |
+| `tele.OnVideoNote` | Video note |
+| `tele.OnContact` | Contact card |
+| `tele.OnLocation` | Location |
+| `tele.OnVenue` | Venue |
+| `tele.OnDice` | Dice roll |
+| `tele.OnInvoice` | Invoice message |
+| `tele.OnPayment` | Successful payment |
+| `tele.OnRefund` | Refunded payment |
+| `tele.OnGame` | Game |
+| `tele.OnPoll` | Poll |
+| `tele.OnPollAnswer` | Poll answer |
+| `tele.OnPinned` | Pinned message notification |
+| `tele.OnChannelPost` | New channel post |
+| `tele.OnEditedChannelPost` | Edited channel post |
+
+### Group / supergroup events
+
+| Constant | Triggers on |
+|---|---|
+| `tele.OnAddedToGroup` | Bot added to group |
+| `tele.OnUserJoined` | New member joined |
+| `tele.OnUserLeft` | Member left |
+| `tele.OnUserShared` | User shared via button |
+| `tele.OnChatShared` | Chat shared via button |
+| `tele.OnNewGroupTitle` | Group title changed |
+| `tele.OnNewGroupPhoto` | Group photo changed |
+| `tele.OnGroupPhotoDeleted` | Group photo deleted |
+| `tele.OnGroupCreated` | Group created |
+| `tele.OnSuperGroupCreated` | Supergroup created |
+| `tele.OnChannelCreated` | Channel created |
+| `tele.OnMigration` | Group migrated to supergroup |
+
+### Topics (forum)
+
+| Constant | Triggers on |
+|---|---|
+| `tele.OnTopicCreated` | Topic created |
+| `tele.OnTopicReopened` | Topic reopened |
+| `tele.OnTopicClosed` | Topic closed |
+| `tele.OnTopicEdited` | Topic edited |
+| `tele.OnGeneralTopicHidden` | General topic hidden |
+| `tele.OnGeneralTopicUnhidden` | General topic unhidden |
+
+### Interactions
+
+| Constant | Triggers on |
+|---|---|
+| `tele.OnCallback` | Inline keyboard button press |
+| `tele.OnQuery` | Inline query |
+| `tele.OnInlineResult` | Chosen inline result |
+| `tele.OnShipping` | Shipping query |
+| `tele.OnCheckout` | Pre-checkout query |
+| `tele.OnWebApp` | Web App data |
+| `tele.OnWriteAccessAllowed` | Write access allowed |
+
+### Chat membership
+
+| Constant | Triggers on |
+|---|---|
+| `tele.OnMyChatMember` | Bot's own chat member status changed |
+| `tele.OnChatMember` | Chat member status changed |
+| `tele.OnChatJoinRequest` | Join request received |
+
+### Video chats
+
+| Constant | Triggers on |
+|---|---|
+| `tele.OnVideoChatStarted` | Video chat started |
+| `tele.OnVideoChatEnded` | Video chat ended |
+| `tele.OnVideoChatParticipants` | Participants invited |
+| `tele.OnVideoChatScheduled` | Video chat scheduled |
+
+### Miscellaneous
+
+| Constant | Triggers on |
+|---|---|
+| `tele.OnProximityAlert` | Proximity alert triggered |
+| `tele.OnAutoDeleteTimer` | Auto-delete timer changed |
+| `tele.OnBoost` | Chat boost updated |
+| `tele.OnBoostRemoved` | Chat boost removed |
+| `tele.OnBusinessConnection` | Business connection |
+| `tele.OnBusinessMessage` | Business message |
+| `tele.OnEditedBusinessMessage` | Edited business message |
+| `tele.OnDeletedBusinessMessages` | Deleted business messages |
+| `tele.OnPurchasedPaidMedia` | Purchased paid media |
+
+## Routing order
+
+Telebot routes each incoming `Update` by inspecting its fields in a deterministic order defined in `ProcessContext`. The key rules are:
+
+1. **Commands take priority over `OnText`** — `/start` is matched before `OnText`.
+2. **Exact text matches** are checked next (e.g. `b.Handle("ping", ...)`).
+3. **Event constants** (`OnText`, `OnPhoto`, etc.) are the fallback.
+4. **Callbacks** route first to the specific button endpoint (using the encoded button ID), then fall through to `OnCallback`.
+
+```go
+// Both handlers can coexist: /start is a command, OnText is a fallback
+b.Handle("/start", onStart)
+b.Handle(tele.OnText, onText) // receives all non-command text messages
+```
+
+## Triggering handlers programmatically
+
+You can fire a handler manually using `b.Trigger`:
+
+```go
+// Trigger executes the registered handler by the endpoint.
+func (b *Bot) Trigger(endpoint interface{}, c Context) error
+```
+
+```go
+err := b.Trigger("/start", c)
+```
+
+This is useful for redirecting from one handler to another, or in tests.

@@ -1,0 +1,295 @@
+---
+title: "Error Handling"
+description: "Understand how Telebot handles errors, configure global error callbacks, and write resilient production bots."
+---
+
+Telebot surfaces errors from handlers, the Telegram API, and the bot internals through a unified pipeline. This page explains each layer and how to configure them.
+
+## How Handler Errors Flow
+
+When a handler returns a non-nil error, Telebot passes it to the `OnError` callback that was configured in `Settings`. If `OnError` is not set, the default implementation logs the error with the update ID:
+
+```go
+// From bot.go — the default fallback
+var defaultOnError = func(err error, c Context) {
+    if c != nil {
+        log.Println(c.Update().ID, err)
+    } else {
+        log.Println(err)
+    }
+}
+```
+
+The bot does **not** crash on handler errors. Each update is processed independently and errors are reported, then discarded.
+
+## Configuring a Global Error Handler
+
+`Settings.OnError` is a function with the signature `func(error, Context)`. The `Context` parameter may be `nil` when the error originates outside a handler (for example, during polling).
+
+```go
+// Settings.OnError is a callback function that will get called on errors
+// resulted from the handler. It is used as post-middleware function.
+// Notice that context can be nil.
+OnError func(error, Context)
+```
+
+```go
+b, err := tele.NewBot(tele.Settings{
+    Token:  os.Getenv("TOKEN"),
+    Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+    OnError: func(err error, c tele.Context) {
+        if c != nil {
+            log.Printf("handler error for update %d: %v", c.Update().ID, err)
+        } else {
+            log.Printf("bot error: %v", err)
+        }
+        // Optionally report to an external service
+        sentry.CaptureException(err)
+    },
+})
+```
+
+You can also call the error handler manually at any time:
+
+```go
+// OnError triggers the configured error callback.
+func (b *Bot) OnError(err error, c Context)
+```
+
+## Telebot Error Variables
+
+The `telebot` package defines sentinel errors for common bot-level failure cases:
+
+```go
+var (
+    ErrBadRecipient    = errors.New("telebot: recipient is nil")
+    ErrUnsupportedWhat = errors.New("telebot: unsupported what argument")
+    ErrCouldNotUpdate  = errors.New("telebot: could not fetch new updates")
+    ErrTrueResult      = errors.New("telebot: result is True")
+    ErrBadContext      = errors.New("telebot: context does not contain message")
+)
+```
+
+| Error | When it occurs |
+|---|---|
+| `ErrBadRecipient` | `b.Send` was called with a `nil` recipient |
+| `ErrUnsupportedWhat` | The `what` argument passed to `Send`/`Reply` is not a string or `Sendable` |
+| `ErrCouldNotUpdate` | The long poller could not fetch updates from Telegram |
+| `ErrTrueResult` | Telegram responded with `{"ok":true,"result":true}` instead of an object |
+| `ErrBadContext` | A context method that requires a message was called on a non-message update |
+
+## Telegram API Error Types
+
+Errors returned from the Telegram API are represented as `*tele.Error`:
+
+```go
+type Error struct {
+    Code        int
+    Description string
+    Message     string
+}
+
+// Error implements the error interface.
+func (err *Error) Error() string
+```
+
+The `Error()` method formats as `"telegram: <message> (<code>)"`.
+
+Two specialised subtypes carry extra information:
+
+```go
+type FloodError struct {
+    err        *Error
+    RetryAfter int  // seconds to wait before retrying
+}
+
+type GroupError struct {
+    err        *Error
+    MigratedTo int64  // new supergroup chat ID
+}
+```
+
+### Matching API errors
+
+Use `errors.Is` or the helper `tele.ErrIs` to match against one of the pre-declared error variables:
+
+```go
+_, err := b.Send(recipient, "Hello")
+if errors.Is(err, tele.ErrBlockedByUser) {
+    // remove user from the database
+    db.DeleteUser(recipient.ID)
+    return
+}
+```
+
+Or use a type assertion to inspect the raw fields:
+
+```go
+var apiErr *tele.Error
+if errors.As(err, &apiErr) {
+    log.Printf("telegram error %d: %s", apiErr.Code, apiErr.Description)
+}
+```
+
+### Full list of pre-declared errors
+
+<CardGroup cols={2}>
+  <Card title="General (4xx/5xx)" icon="circle-exclamation">
+    `ErrTooLarge`, `ErrUnauthorized`, `ErrNotFound`, `ErrInternal`
+  </Card>
+  <Card title="Forbidden (403)" icon="ban">
+    `ErrBlockedByUser`, `ErrKickedFromGroup`, `ErrKickedFromSuperGroup`, `ErrKickedFromChannel`, `ErrNotStartedByUser`, `ErrUserIsDeactivated`, `ErrNotChannelMember`
+  </Card>
+  <Card title="Message errors" icon="message">
+    `ErrCantEditMessage`, `ErrMessageNotModified`, `ErrSameMessageContent`, `ErrEmptyMessage`, `ErrEmptyText`, `ErrTooLongMessage`, `ErrTooLongMarkup`
+  </Card>
+  <Card title="File errors" icon="file">
+    `ErrWrongFileID`, `ErrWrongFileIDCharacter`, `ErrWrongFileIDLength`, `ErrWrongFileIDPadding`, `ErrWrongFileIDSymbol`, `ErrCantUploadFile`, `ErrBadURLContent`
+  </Card>
+  <Card title="Rights errors" icon="lock">
+    `ErrNoRightsToDelete`, `ErrNoRightsToRestrict`, `ErrNoRightsToSend`, `ErrNoRightsToSendGifs`, `ErrNoRightsToSendPhoto`, `ErrNoRightsToSendStickers`, `ErrCantRemoveOwner`, `ErrUserIsAdmin`
+  </Card>
+  <Card title="Chat errors" icon="users">
+    `ErrChatNotFound`, `ErrEmptyChatID`, `ErrGroupMigrated`, `ErrChatAboutNotModified`, `ErrChannelsTooMuch`, `ErrChannelsTooMuchUser`
+  </Card>
+</CardGroup>
+
+### Handling flood errors
+
+```go
+var floodErr tele.FloodError
+if errors.As(err, &floodErr) {
+    log.Printf("rate limited, retrying in %d seconds", floodErr.RetryAfter)
+    time.Sleep(time.Duration(floodErr.RetryAfter) * time.Second)
+    // retry the operation
+}
+```
+
+### Handling group migration
+
+```go
+var groupErr tele.GroupError
+if errors.As(err, &groupErr) {
+    log.Printf("group migrated to supergroup: %d", groupErr.MigratedTo)
+    db.UpdateChatID(oldChatID, groupErr.MigratedTo)
+}
+```
+
+## Error Handling in Middleware
+
+Middleware can inspect, transform, or suppress errors returned by handlers:
+
+```go
+func ErrorMapper(next tele.HandlerFunc) tele.HandlerFunc {
+    return func(c tele.Context) error {
+        err := next(c)
+        if err == nil {
+            return nil
+        }
+        // Suppress "message not modified" — this often happens with
+        // idempotent edits and is not worth surfacing
+        if errors.Is(err, tele.ErrMessageNotModified) {
+            return nil
+        }
+        return err
+    }
+}
+
+b.Use(ErrorMapper)
+```
+
+## Panic Recovery with Recover Middleware
+
+Handlers that panic will crash the goroutine processing the update, taking down that update's processing. The `middleware.Recover` middleware wraps every handler in a deferred recover:
+
+```go
+// Recover returns a middleware that recovers a panic happened in
+// the handler.
+func Recover(onError ...RecoverFunc) tele.MiddlewareFunc
+```
+
+It captures both `error`-typed panics and `string`-typed panics, converting them to errors that are then routed through `b.OnError` (or a custom `RecoverFunc`).
+
+```go
+b.Use(middleware.Recover())
+```
+
+<Warning>
+Register `Recover` as the **first** middleware (outermost) with `b.Use` so it wraps the entire middleware chain. Middleware registered before `Recover` won't be protected.
+</Warning>
+
+```go
+// Recommended ordering
+b.Use(middleware.Recover()) // outermost — catches panics from everything below
+b.Use(middleware.Logger())  // logs all requests
+b.Use(AuthMiddleware)       // custom auth
+```
+
+## Best Practices for Production Bots
+
+<CardGroup cols={2}>
+  <Card title="Always set OnError" icon="bell">
+    The default handler only logs to stderr. In production, route errors to a structured logger or an error-tracking service (Sentry, Datadog, etc.).
+  </Card>
+  <Card title="Use Recover middleware" icon="shield">
+    Panics in handlers should never crash the bot. Always register `middleware.Recover()` globally, before other middleware.
+  </Card>
+  <Card title="Match specific API errors" icon="magnifying-glass">
+    Don't treat all API errors the same. Check for `ErrBlockedByUser` to clean up stale users, `ErrMessageNotModified` to suppress noise, and `FloodError` to implement backoff.
+  </Card>
+  <Card title="Return errors from handlers" icon="arrow-up-right-from-square">
+    Always return errors from handler functions instead of swallowing them with `log.Println`. This ensures they flow through `OnError` and can be centrally tracked.
+  </Card>
+</CardGroup>
+
+### Structured error handling example
+
+```go
+func setupBot() *tele.Bot {
+    b, err := tele.NewBot(tele.Settings{
+        Token:  os.Getenv("TOKEN"),
+        Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+        OnError: func(err error, c tele.Context) {
+            // Classify and route the error
+            var apiErr *tele.Error
+            var floodErr tele.FloodError
+
+            switch {
+            case errors.Is(err, tele.ErrBlockedByUser),
+                errors.Is(err, tele.ErrUserIsDeactivated),
+                errors.Is(err, tele.ErrNotStartedByUser):
+                // User is unreachable — clean up silently
+                if c != nil {
+                    db.DeactivateUser(c.Sender().ID)
+                }
+
+            case errors.As(err, &floodErr):
+                // Telegram is rate limiting us
+                log.Printf("flood control: retry after %ds", floodErr.RetryAfter)
+
+            case errors.Is(err, tele.ErrMessageNotModified):
+                // Idempotent edit — not worth logging
+
+            case errors.As(err, &apiErr) && apiErr.Code >= 500:
+                // Telegram server error — report and alert on-call
+                sentry.CaptureException(err)
+
+            default:
+                // Unexpected error — always report
+                sentry.CaptureException(err)
+                if c != nil {
+                    log.Printf("unhandled error (update %d): %v", c.Update().ID, err)
+                }
+            }
+        },
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Protect against panics
+    b.Use(middleware.Recover())
+
+    return b
+}
+```

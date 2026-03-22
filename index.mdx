@@ -1,97 +1,96 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Telebot — Telegram Bot Framework for Go"
+description: "A concise, high-performance Go framework for building Telegram bots with routing, middleware, keyboards, inline mode, and a transparent File API."
 ---
 
-## Setting up
-
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build and run your first Telegram bot in minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Core Concepts" icon="book" href="/concepts/bot">
+    Understand the Bot, Context, handlers, and middleware.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Guides" icon="map" href="/guides/commands">
+    Step-by-step guides for commands, keyboards, files, and more.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/bot">
+    Full reference for every type, method, and event constant.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What is Telebot?
 
-Everything you need to create world-class documentation.
+Telebot is a bot framework for the [Telegram Bot API](https://core.telegram.org/bots/api) written in Go. Rather than providing a thin 1:1 wrapper over the API, Telebot focuses on developer ergonomics and performance — giving you a clean routing system, composable middleware, and transparent file handling out of the box.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+```go go.mod
+module gopkg.in/telebot.v4
+```
 
-## Need inspiration?
+```bash
+go get -u gopkg.in/telebot.v4
+```
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+## Minimal example
+
+```go main.go
+package main
+
+import (
+	"log"
+	"os"
+	"time"
+
+	tele "gopkg.in/telebot.v4"
+)
+
+func main() {
+	pref := tele.Settings{
+		Token:  os.Getenv("TOKEN"),
+		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+	}
+
+	b, err := tele.NewBot(pref)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	b.Handle("/hello", func(c tele.Context) error {
+		return c.Send("Hello!")
+	})
+
+	b.Start()
+}
+```
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Command routing" icon="route">
+    Route `/commands`, text patterns, and all Telegram update types through a single `Handle()` API.
+  </Card>
+  <Card title="Middleware" icon="layer-group">
+    Chain middleware globally, per-group, or per-handler. Includes Logger, AutoRespond, Whitelist, and Recover out of the box.
+  </Card>
+  <Card title="Transparent File API" icon="file">
+    Send files from disk or URL. Telebot automatically uploads on first send and reuses the Telegram FileID on subsequent sends.
+  </Card>
+  <Card title="Keyboards" icon="keyboard">
+    Build reply and inline keyboards with a fluent markup builder. Buttons act as routing endpoints.
+  </Card>
+  <Card title="Inline mode" icon="magnifying-glass">
+    Handle inline queries and respond with typed result objects for photos, articles, GIFs, and more.
+  </Card>
+  <Card title="Layout system" icon="table-columns">
+    Define bot configuration, keyboards, and locales in YAML. Switch user locale at runtime.
+  </Card>
+</CardGroup>
+
+## Installation
+
+```bash
+go get -u gopkg.in/telebot.v4
+```
+
+<Note>
+Telebot requires Go 1.16 or later.
+</Note>

@@ -1,0 +1,364 @@
+---
+title: "Custom Middleware"
+description: "Write, compose, and attach your own middleware functions to control the handler pipeline."
+---
+
+Middleware in Telebot lets you intercept, inspect, and short-circuit handler execution. A middleware wraps a handler function and decides whether to call the next one in the chain.
+
+## The MiddlewareFunc Type
+
+```go
+// MiddlewareFunc represents a middleware processing function,
+// which gets called before the endpoint group or specific handler.
+type MiddlewareFunc func(HandlerFunc) HandlerFunc
+```
+
+A middleware receives the next `HandlerFunc` in the chain and returns a new `HandlerFunc` that can execute logic before, after, or instead of calling `next`.
+
+## Basic Pattern
+
+```go
+func MyMiddleware(next tele.HandlerFunc) tele.HandlerFunc {
+    return func(c tele.Context) error {
+        // logic before the handler
+        err := next(c)
+        // logic after the handler
+        return err
+    }
+}
+```
+
+To short-circuit (skip the handler entirely), just return without calling `next`:
+
+```go
+func MyMiddleware(next tele.HandlerFunc) tele.HandlerFunc {
+    return func(c tele.Context) error {
+        if someCondition {
+            return nil // skip handler silently
+        }
+        return next(c)
+    }
+}
+```
+
+## Passing Data Through the Chain
+
+Use `c.Set` and `c.Get` to store and retrieve arbitrary values within the same request lifetime:
+
+```go
+// Set saves data in the context.
+func (c Context) Set(key string, val interface{})
+
+// Get retrieves data from the context.
+func (c Context) Get(key string) interface{}
+```
+
+```go
+func AuthMiddleware(next tele.HandlerFunc) tele.HandlerFunc {
+    return func(c tele.Context) error {
+        user, err := db.FindUser(c.Sender().ID)
+        if err != nil {
+            return err
+        }
+        // make the user available to the handler
+        c.Set("user", user)
+        return next(c)
+    }
+}
+
+func onProfile(c tele.Context) error {
+    user := c.Get("user").(*User)
+    return c.Send("Hello, " + user.Name)
+}
+```
+
+## Attaching Middleware
+
+There are three scopes at which middleware can be applied.
+
+### Global — `b.Use`
+
+Applies to every handler registered on the bot:
+
+```go
+// Use adds middleware to the global bot chain.
+func (b *Bot) Use(middleware ...MiddlewareFunc)
+```
+
+```go
+b.Use(middleware.Logger())
+b.Use(middleware.Recover())
+b.Use(AuthMiddleware)
+```
+
+### Group
+
+Applies only to handlers registered through that group:
+
+```go
+// Group is a separated group of handlers, united by the general middleware.
+type Group struct { ... }
+
+// Use adds middleware to the chain.
+func (g *Group) Use(middleware ...MiddlewareFunc)
+
+// Handle adds endpoint handler to the bot, combining group's middleware.
+func (g *Group) Handle(endpoint interface{}, h HandlerFunc, m ...MiddlewareFunc)
+```
+
+```go
+adminGroup := b.Group()
+adminGroup.Use(AdminOnly(adminIDs...))
+adminGroup.Handle("/ban", onBan)
+adminGroup.Handle("/broadcast", onBroadcast)
+```
+
+### Per-handler
+
+Passed directly to `b.Handle` or `g.Handle` as variadic arguments after the handler:
+
+```go
+// Handle lets you set the handler for some command name or one of the
+// supported endpoints. It also applies middleware if such is passed.
+func (b *Bot) Handle(endpoint interface{}, h HandlerFunc, m ...MiddlewareFunc)
+```
+
+```go
+b.Handle("/ban", onBan, middleware.Whitelist(adminIDs...))
+```
+
+### Middleware ordering
+
+Middleware runs in registration order. For global middleware registered with `b.Use`, the first one registered is the outermost wrapper — it executes first on the way in and last on the way out.
+
+```go
+b.Use(First)   // runs first
+b.Use(Second)  // runs second
+b.Use(Third)   // runs third, closest to the handler
+```
+
+## Built-in Middleware
+
+Telebot ships a `middleware` subpackage (`gopkg.in/telebot.v4/middleware`) with ready-to-use middleware.
+
+### Logger
+
+Logs every incoming update as indented JSON:
+
+```go
+// Logger returns a middleware that logs incoming updates.
+// If no custom logger is provided, log.Default() will be used.
+func Logger(logger ...*log.Logger) tele.MiddlewareFunc
+```
+
+```go
+b.Use(middleware.Logger())
+
+// with a custom logger
+b.Use(middleware.Logger(myLogger))
+```
+
+### Recover
+
+Catches panics in handlers and converts them to errors:
+
+```go
+// Recover returns a middleware that recovers a panic happened in the handler.
+func Recover(onError ...RecoverFunc) tele.MiddlewareFunc
+```
+
+```go
+b.Use(middleware.Recover())
+
+// with a custom error handler
+b.Use(middleware.Recover(func(err error, c tele.Context) {
+    log.Printf("panic in handler: %v", err)
+    c.Send("Something went wrong, please try again.")
+}))
+```
+
+### AutoRespond
+
+Automatically calls `c.Respond()` for every callback query, preventing the Telegram "loading" spinner:
+
+```go
+// AutoRespond returns a middleware that automatically responds
+// to every callback.
+func AutoRespond() tele.MiddlewareFunc
+```
+
+```go
+b.Use(middleware.AutoRespond())
+```
+
+### Whitelist / Blacklist
+
+Allow or block specific users by chat ID:
+
+```go
+// Whitelist returns a middleware that skips the update for users
+// NOT specified in the chats field.
+func Whitelist(chats ...int64) tele.MiddlewareFunc
+
+// Blacklist returns a middleware that skips the update for users
+// specified in the chats field.
+func Blacklist(chats ...int64) tele.MiddlewareFunc
+```
+
+```go
+// Only allow admins
+b.Handle("/admin", onAdmin, middleware.Whitelist(123456789, 987654321))
+
+// Block spammers globally
+b.Use(middleware.Blacklist(spammerIDs...))
+```
+
+### Restrict (custom in/out)
+
+For more control, use `Restrict` to define separate handlers for matched and non-matched chats:
+
+```go
+// RestrictConfig defines config for Restrict middleware.
+type RestrictConfig struct {
+    // Chats is a list of chats that are going to be affected.
+    Chats []int64
+
+    // In is called when the chat IS in the list.
+    In tele.HandlerFunc
+
+    // Out is called when the chat is NOT in the list.
+    Out tele.HandlerFunc
+}
+
+func Restrict(v RestrictConfig) tele.MiddlewareFunc
+```
+
+```go
+b.Use(middleware.Restrict(middleware.RestrictConfig{
+    Chats: premiumUserIDs,
+    In:    next, // let premium users through
+    Out: func(c tele.Context) error {
+        return c.Send("This feature is for premium users only.")
+    },
+}))
+```
+
+### IgnoreVia
+
+Skips updates that were sent "via" an inline bot:
+
+```go
+// IgnoreVia returns a middleware that ignores all "sent via" messages.
+func IgnoreVia() tele.MiddlewareFunc
+```
+
+## Real-World Examples
+
+### Rate limiting middleware
+
+```go
+func RateLimit(limit int, window time.Duration) tele.MiddlewareFunc {
+    type entry struct {
+        count  int
+        window time.Time
+    }
+    var (
+        mu    sync.Mutex
+        users = make(map[int64]*entry)
+    )
+
+    return func(next tele.HandlerFunc) tele.HandlerFunc {
+        return func(c tele.Context) error {
+            id := c.Sender().ID
+            now := time.Now()
+
+            mu.Lock()
+            e, ok := users[id]
+            if !ok || now.After(e.window) {
+                users[id] = &entry{count: 1, window: now.Add(window)}
+                mu.Unlock()
+                return next(c)
+            }
+            e.count++
+            if e.count > limit {
+                mu.Unlock()
+                return c.Send("Too many requests. Please slow down.")
+            }
+            mu.Unlock()
+            return next(c)
+        }
+    }
+}
+
+// Allow 5 messages per 10 seconds per user
+b.Use(RateLimit(5, 10*time.Second))
+```
+
+### Admin-only middleware
+
+```go
+func AdminOnly(adminIDs ...int64) tele.MiddlewareFunc {
+    set := make(map[int64]struct{}, len(adminIDs))
+    for _, id := range adminIDs {
+        set[id] = struct{}{}
+    }
+    return func(next tele.HandlerFunc) tele.HandlerFunc {
+        return func(c tele.Context) error {
+            if _, ok := set[c.Sender().ID]; !ok {
+                return c.Send("Access denied.")
+            }
+            return next(c)
+        }
+    }
+}
+
+adminGroup := b.Group()
+adminGroup.Use(AdminOnly(123456789))
+adminGroup.Handle("/ban", onBan)
+adminGroup.Handle("/stats", onStats)
+```
+
+<Tip>
+The built-in `middleware.Whitelist` does the same thing but silently skips the update instead of sending a reply. Write your own when you need a custom rejection response.
+</Tip>
+
+### Logging middleware
+
+The built-in `middleware.Logger` logs the raw update JSON. Here's a leaner version that logs command name and latency:
+
+```go
+func TimingLogger(logger *log.Logger) tele.MiddlewareFunc {
+    return func(next tele.HandlerFunc) tele.HandlerFunc {
+        return func(c tele.Context) error {
+            start := time.Now()
+            err := next(c)
+            logger.Printf(
+                "update=%d sender=%d elapsed=%s err=%v",
+                c.Update().ID,
+                c.Sender().ID,
+                time.Since(start),
+                err,
+            )
+            return err
+        }
+    }
+}
+```
+
+### Error recovery middleware
+
+The built-in `middleware.Recover` handles panics. Extend it to also send the user an apology message:
+
+```go
+b.Use(middleware.Recover(func(err error, c tele.Context) {
+    log.Printf("recovered panic: %v", err)
+    // Notify user without surfacing internal details
+    _ = c.Send("An unexpected error occurred. Our team has been notified.")
+    // Report to external service
+    sentry.CaptureException(err)
+}))
+```
+
+<Warning>
+Always register `Recover` before other middleware so it wraps the entire chain. If registered last, panics in earlier middleware won't be caught.
+</Warning>

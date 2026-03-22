@@ -1,0 +1,415 @@
+---
+title: "Markup & Keyboards"
+description: "Reference for ReplyMarkup, Btn, inline and reply keyboard types, and button constructors."
+---
+
+Telebot provides a unified API for constructing both inline keyboards (attached to messages) and reply keyboards (shown below the input field).
+
+## ReplyMarkup
+
+`ReplyMarkup` is the single struct used for all keyboard types. Populate either `InlineKeyboard` or `ReplyKeyboard`, not both.
+
+```go
+type ReplyMarkup struct {
+    InlineKeyboard  [][]InlineButton `json:"inline_keyboard,omitempty"`
+    ReplyKeyboard   [][]ReplyButton  `json:"keyboard,omitempty"`
+    ForceReply      bool             `json:"force_reply,omitempty"`
+    ResizeKeyboard  bool             `json:"resize_keyboard,omitempty"`
+    OneTimeKeyboard bool             `json:"one_time_keyboard,omitempty"`
+    RemoveKeyboard  bool             `json:"remove_keyboard,omitempty"`
+    Selective       bool             `json:"selective,omitempty"`
+    Placeholder     string           `json:"input_field_placeholder,omitempty"`
+    IsPersistent    bool             `json:"is_persistent,omitempty"`
+}
+```
+
+### Fields
+
+<ResponseField name="InlineKeyboard" type="[][]InlineButton">
+  Grid of inline buttons rendered inside the message.
+</ResponseField>
+
+<ResponseField name="ReplyKeyboard" type="[][]ReplyButton">
+  Grid of reply keyboard buttons shown below the text input.
+</ResponseField>
+
+<ResponseField name="ForceReply" type="bool">
+  Forces the client to display a reply interface as if the user tapped "Reply".
+</ResponseField>
+
+<ResponseField name="ResizeKeyboard" type="bool">
+  Requests the client to resize the reply keyboard vertically for optimal fit.
+</ResponseField>
+
+<ResponseField name="OneTimeKeyboard" type="bool">
+  Hides the reply keyboard after it has been used once.
+</ResponseField>
+
+<ResponseField name="RemoveKeyboard" type="bool">
+  Requests the client to remove the reply keyboard.
+</ResponseField>
+
+<ResponseField name="Selective" type="bool">
+  When `true`, the keyboard is shown only to mentioned users and the sender of the original message (when replying).
+</ResponseField>
+
+<ResponseField name="Placeholder" type="string">
+  Placeholder text shown in the input field when the reply keyboard is active. JSON: `input_field_placeholder`.
+</ResponseField>
+
+<ResponseField name="IsPersistent" type="bool">
+  When `true`, the reply keyboard is always shown (not collapsed).
+</ResponseField>
+
+---
+
+## Btn
+
+`Btn` is a constructor button type that becomes either an `InlineButton` or a `ReplyButton` when you call `.Inline()` or `.Reply()` on it.
+
+```go
+type Btn struct {
+    Unique          string          `json:"unique,omitempty"`
+    Text            string          `json:"text,omitempty"`
+    URL             string          `json:"url,omitempty"`
+    Data            string          `json:"callback_data,omitempty"`
+    InlineQuery     string          `json:"switch_inline_query,omitempty"`
+    InlineQueryChat string          `json:"switch_inline_query_current_chat,omitempty"`
+    Login           *Login          `json:"login_url,omitempty"`
+    WebApp          *WebApp         `json:"web_app,omitempty"`
+    Contact         bool            `json:"request_contact,omitempty"`
+    Location        bool            `json:"request_location,omitempty"`
+    Poll            PollType        `json:"request_poll,omitempty"`
+    User            *ReplyRecipient `json:"request_user,omitempty"`
+    Chat            *ReplyRecipient `json:"request_chat,omitempty"`
+    CopyText        *CopyTextButton `json:"copy_text,omitempty"`
+}
+```
+
+<ResponseField name="Unique" type="string">
+  Callback endpoint unique name. Set this to make the button an inline callback button that routes to a registered handler.
+</ResponseField>
+
+<ResponseField name="Text" type="string">
+  Button label text.
+</ResponseField>
+
+<ResponseField name="URL" type="string">
+  URL to open when the button is pressed (inline only).
+</ResponseField>
+
+<ResponseField name="Data" type="string">
+  Raw callback data string (inline only). When `Unique` is set, this becomes the payload appended after the unique identifier.
+</ResponseField>
+
+<ResponseField name="InlineQuery" type="string">
+  Switches to inline mode with the given query in the chosen chat.
+</ResponseField>
+
+<ResponseField name="InlineQueryChat" type="string">
+  Switches to inline mode with the given query in the current chat.
+</ResponseField>
+
+<ResponseField name="Login" type="*Login">
+  Telegram Login Widget parameters.
+</ResponseField>
+
+<ResponseField name="WebApp" type="*WebApp">
+  Web App to launch.
+</ResponseField>
+
+<ResponseField name="Contact" type="bool">
+  Request the user's phone number (reply keyboard only).
+</ResponseField>
+
+<ResponseField name="Location" type="bool">
+  Request the user's current location (reply keyboard only).
+</ResponseField>
+
+<ResponseField name="Poll" type="PollType">
+  Request a poll creation (reply keyboard only). Use `PollAny`, `PollQuiz`, or `PollRegular`.
+</ResponseField>
+
+<ResponseField name="User" type="*ReplyRecipient">
+  Request user sharing (reply keyboard only).
+</ResponseField>
+
+<ResponseField name="Chat" type="*ReplyRecipient">
+  Request chat sharing (reply keyboard only).
+</ResponseField>
+
+<ResponseField name="CopyText" type="*CopyTextButton">
+  Copy the given text to clipboard when pressed.
+</ResponseField>
+
+---
+
+## Button Constructors
+
+All constructors are methods on `*ReplyMarkup` and return a `Btn`.
+
+### Text
+
+```go
+func (r *ReplyMarkup) Text(text string) Btn
+```
+
+Creates a plain reply keyboard button.
+
+### Contact
+
+```go
+func (r *ReplyMarkup) Contact(text string) Btn
+```
+
+Creates a button that requests the user's phone number.
+
+### Location
+
+```go
+func (r *ReplyMarkup) Location(text string) Btn
+```
+
+Creates a button that requests the user's location.
+
+### Poll
+
+```go
+func (r *ReplyMarkup) Poll(text string, poll PollType) Btn
+```
+
+Creates a button that requests a poll creation of the given type.
+
+### Data
+
+```go
+func (r *ReplyMarkup) Data(text, unique string, data ...string) Btn
+```
+
+Creates an inline callback button. `unique` is the endpoint name registered with `b.Handle`. The optional `data` strings are joined with `|` and become the callback payload.
+
+```go
+btnSettings := rm.Data("\u2699 Settings", "settings")
+btnDelete   := rm.Data("Delete", "delete", strconv.Itoa(itemID))
+
+b.Handle(&btnSettings, func(c tele.Context) error {
+    return c.Edit("Settings menu")
+})
+```
+
+### URL
+
+```go
+func (r *ReplyMarkup) URL(text, url string) Btn
+```
+
+Creates an inline button that opens a URL.
+
+### Query
+
+```go
+func (r *ReplyMarkup) Query(text, query string) Btn
+```
+
+Creates an inline button that switches to inline mode with the given query.
+
+### QueryChat
+
+```go
+func (r *ReplyMarkup) QueryChat(text, query string) Btn
+```
+
+Creates an inline button that switches to inline mode in the current chat.
+
+### Login
+
+```go
+func (r *ReplyMarkup) Login(text string, login *Login) Btn
+```
+
+Creates an inline button for Telegram Login.
+
+### WebApp
+
+```go
+func (r *ReplyMarkup) WebApp(text string, app *WebApp) Btn
+```
+
+Creates an inline button that launches a Web App.
+
+### User
+
+```go
+func (r *ReplyMarkup) User(text string, user *ReplyRecipient) Btn
+```
+
+Creates a reply keyboard button that requests user sharing.
+
+### Chat
+
+```go
+func (r *ReplyMarkup) Chat(text string, chat *ReplyRecipient) Btn
+```
+
+Creates a reply keyboard button that requests chat sharing.
+
+### CopyText
+
+```go
+func (r *ReplyMarkup) CopyText(text, copyText string) Btn
+```
+
+Creates an inline button that copies `copyText` to the clipboard.
+
+---
+
+## Layout Builders
+
+### Row
+
+```go
+func (r *ReplyMarkup) Row(many ...Btn) Row
+```
+
+Groups buttons into a single row.
+
+### Split
+
+```go
+func (r *ReplyMarkup) Split(max int, btns []Btn) []Row
+```
+
+Splits a flat slice of buttons into rows with at most `max` buttons each.
+
+```go
+rows := rm.Split(3, []tele.Btn{b1, b2, b3, b4, b5, b6})
+// -> [[b1, b2, b3], [b4, b5, b6]]
+```
+
+### Inline
+
+```go
+func (r *ReplyMarkup) Inline(rows ...Row)
+```
+
+Populates `r.InlineKeyboard` from the given rows. Panics if any button is not a valid inline button (i.e. has no `Unique`, `URL`, `Data`, or other inline field).
+
+### Reply
+
+```go
+func (r *ReplyMarkup) Reply(rows ...Row)
+```
+
+Populates `r.ReplyKeyboard` from the given rows. Panics if any button cannot be a reply button (e.g. has a `Unique` field set).
+
+---
+
+## Usage Pattern
+
+```go
+rm := &tele.ReplyMarkup{}
+
+btnHelp := rm.Text("Help")
+btnSettings := rm.Data("Settings", "settings")
+btnURL := rm.URL("Visit site", "https://example.com")
+
+// Reply keyboard
+rm.Reply(
+    rm.Row(btnHelp),
+)
+
+// Inline keyboard
+rm.Inline(
+    rm.Row(btnSettings, btnURL),
+)
+
+b.Send(recipient, "Choose an option:", rm)
+```
+
+<Tip>
+  Callback buttons registered via `Data()` must be handled with `b.Handle(&btn, handler)` using a pointer to the `Btn` value, or via the `unique` string prefixed with `\f`.
+</Tip>
+
+---
+
+## InlineButton
+
+The low-level inline button type used inside `ReplyMarkup.InlineKeyboard`.
+
+```go
+type InlineButton struct {
+    Unique                string             `json:"unique,omitempty"`
+    Text                  string             `json:"text"`
+    URL                   string             `json:"url,omitempty"`
+    Data                  string             `json:"callback_data,omitempty"`
+    InlineQuery           string             `json:"switch_inline_query,omitempty"`
+    InlineQueryChat       string             `json:"switch_inline_query_current_chat"`
+    InlineQueryChosenChat *SwitchInlineQuery `json:"switch_inline_query_chosen_chat,omitempty"`
+    Login                 *Login             `json:"login_url,omitempty"`
+    WebApp                *WebApp            `json:"web_app,omitempty"`
+    CallbackGame          *CallbackGame      `json:"callback_game,omitempty"`
+    Pay                   bool               `json:"pay,omitempty"`
+    CopyText              *CopyTextButton    `json:"copy_text,omitempty"`
+}
+```
+
+#### With
+
+```go
+func (t *InlineButton) With(data string) *InlineButton
+```
+
+Returns a copy of the button with the given callback `data`. Useful for reusing the same button definition with different payloads.
+
+---
+
+## ReplyButton
+
+The low-level reply keyboard button type.
+
+```go
+type ReplyButton struct {
+    Text     string          `json:"text"`
+    Contact  bool            `json:"request_contact,omitempty"`
+    Location bool            `json:"request_location,omitempty"`
+    Poll     PollType        `json:"request_poll,omitempty"`
+    User     *ReplyRecipient `json:"request_users,omitempty"`
+    Chat     *ReplyRecipient `json:"request_chat,omitempty"`
+    WebApp   *WebApp         `json:"web_app,omitempty"`
+}
+```
+
+---
+
+## Login
+
+Parameters for a Telegram Login inline button.
+
+```go
+type Login struct {
+    URL         string `json:"url"`
+    Text        string `json:"forward_text,omitempty"`
+    Username    string `json:"bot_username,omitempty"`
+    WriteAccess bool   `json:"request_write_access,omitempty"`
+}
+```
+
+---
+
+## MenuButton
+
+Describes the bot's menu button in a private chat.
+
+```go
+type MenuButton struct {
+    Type   MenuButtonType `json:"type"`
+    Text   string         `json:"text,omitempty"`
+    WebApp *WebApp        `json:"web_app,omitempty"`
+}
+
+const (
+    MenuButtonDefault  MenuButtonType = "default"
+    MenuButtonCommands MenuButtonType = "commands"
+    MenuButtonWebApp   MenuButtonType = "web_app"
+)
+```

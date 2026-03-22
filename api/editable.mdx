@@ -1,0 +1,103 @@
+---
+title: "Editable"
+description: "The Editable interface and StoredMessage type for editing and deleting messages."
+---
+
+## Editable interface
+
+`Editable` is implemented by any type that can identify a specific Telegram message via its ID and chat ID:
+
+```go
+type Editable interface {
+    // MessageSig is a "message signature".
+    // For inline messages, return chatID = 0.
+    MessageSig() (messageID string, chatID int64)
+}
+```
+
+Telebot requires only these two values for edit operations — you do not need to hold the full `*Message` object.
+
+## StoredMessage
+
+`StoredMessage` is a ready-to-use Editable implementation designed for database storage:
+
+```go
+type StoredMessage struct {
+    MessageID string `sql:"message_id" json:"message_id"`
+    ChatID    int64  `sql:"chat_id"    json:"chat_id"`
+}
+
+func (x StoredMessage) MessageSig() (string, int64) {
+    return x.MessageID, x.ChatID
+}
+```
+
+Store it in your database, then edit or delete the message later without loading the full message:
+
+```go
+// Store when sending
+msg, err := b.Send(user, "Processing your request...")
+stored := tele.StoredMessage{
+    MessageID: strconv.Itoa(msg.ID),
+    ChatID:    msg.Chat.ID,
+}
+db.Save(&stored)
+
+// Edit later
+db.Find(&stored)
+b.Edit(&stored, "Done!")
+
+// Or delete
+b.Delete(&stored)
+```
+
+## Message as Editable
+
+`*Message` implements `Editable` directly:
+
+```go
+msg, _ := b.Send(user, "Hello")
+b.Edit(msg, "Hello, updated!")
+b.Delete(msg)
+```
+
+## Custom Editable types
+
+Embed `StoredMessage` or implement `MessageSig()` on your own model:
+
+```go
+type OrderMessage struct {
+    OrderID   int
+    MessageID string `json:"msg_id"`
+    ChatID    int64  `json:"chat_id"`
+}
+
+func (o *OrderMessage) MessageSig() (string, int64) {
+    return o.MessageID, o.ChatID
+}
+
+// Now OrderMessage is editable:
+order := db.FindOrder(42)
+b.Edit(order, fmt.Sprintf("Order #%d shipped!", order.OrderID))
+```
+
+## Inline messages
+
+For inline messages (sent via inline mode), there is no `chat_id`. Return `0` for `chatID`:
+
+```go
+func (m *InlineStoredMessage) MessageSig() (string, int64) {
+    return m.InlineMessageID, 0
+}
+```
+
+## Related bot methods
+
+| Method | Description |
+|--------|-------------|
+| `b.Edit(msg Editable, what interface{}, opts ...interface{})` | Edit message text or media |
+| `b.EditCaption(msg Editable, caption string, opts ...interface{})` | Edit media caption |
+| `b.EditReplyMarkup(msg Editable, markup *ReplyMarkup)` | Edit inline keyboard |
+| `b.Delete(msg Editable) error` | Delete a message |
+| `b.Pin(msg Editable, opts ...interface{}) error` | Pin a message in the chat |
+| `b.Unpin(chat Recipient, opts ...interface{}) error` | Unpin a pinned message |

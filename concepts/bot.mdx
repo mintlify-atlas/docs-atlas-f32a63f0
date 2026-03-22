@@ -1,0 +1,214 @@
+---
+title: "Bot"
+description: "The Bot struct, NewBot constructor, Settings configuration, and core lifecycle methods."
+---
+
+The `Bot` struct is the central object in every Telebot application. It holds your Telegram credentials, owns the update channel, and dispatches incoming events to your registered handlers.
+
+## Creating a bot
+
+```go
+import (
+    "time"
+    tele "gopkg.in/telebot.v4"
+)
+
+func main() {
+    b, err := tele.NewBot(tele.Settings{
+        Token:  "YOUR_BOT_TOKEN",
+        Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    b.Handle("/start", func(c tele.Context) error {
+        return c.Send("Hello world!")
+    })
+
+    b.Start()
+}
+```
+
+`NewBot` calls `getMe` on the Telegram API to verify your token and populate `Bot.Me`. If you need to create a bot without a network connection (e.g. in tests), set `Settings.Offline = true`.
+
+## `NewBot` signature
+
+```go
+func NewBot(pref Settings) (*Bot, error)
+```
+
+Returns a fully initialised `*Bot` or an error if the token is invalid or the Telegram API is unreachable.
+
+**Defaults applied by `NewBot`:**
+
+| Field | Default |
+|---|---|
+| `Updates` | `100` (channel capacity) |
+| `URL` | `https://api.telegram.org` |
+| `Poller` | `&LongPoller{}` |
+| `Client` | `&http.Client{Timeout: time.Minute}` |
+| `OnError` | logs `update.ID` + error to `log.Println` |
+
+## Settings
+
+Pass a `Settings` struct to `NewBot` to configure every aspect of the bot.
+
+<ParamField path="Token" type="string" required>
+  Your bot token obtained from [@BotFather](https://t.me/BotFather). This is the only required field.
+</ParamField>
+
+<ParamField path="URL" type="string">
+  Base URL for the Telegram Bot API. Defaults to `https://api.telegram.org`. Override this to point at a local Bot API server.
+</ParamField>
+
+<ParamField path="Updates" type="int">
+  Capacity of the internal `Updates` channel. Defaults to `100`. Increase this if your bot processes bursts of messages slowly.
+</ParamField>
+
+<ParamField path="Poller" type="Poller">
+  The update source. Defaults to `&LongPoller{}`. See the [Poller](/concepts/poller) page for all available implementations.
+</ParamField>
+
+<ParamField path="Client" type="*http.Client">
+  Custom HTTP client used for all Telegram API requests. Useful for setting proxies or custom timeouts.
+</ParamField>
+
+<ParamField path="Synchronous" type="bool">
+  When `true`, handlers run sequentially. `ProcessUpdate` blocks until the handler returns. Useful in tests.
+</ParamField>
+
+<ParamField path="Verbose" type="bool">
+  When `true`, logs every outgoing API request. Use for debugging only.
+</ParamField>
+
+<ParamField path="ParseMode" type="ParseMode">
+  Default parse mode attached to every outgoing message (`ModeHTML`, `ModeMarkdown`, `ModeMarkdownV2`). Can be overridden per-send.
+</ParamField>
+
+<ParamField path="Offline" type="bool">
+  Skip the initial `getMe` API call. `Bot.Me` is set to an empty `&User{}`. Intended for unit tests.
+</ParamField>
+
+<ParamField path="OnError" type="func(error, Context)">
+  Called whenever a handler returns an error. Receives the error and the context that produced it. Context may be `nil` for non-handler errors.
+</ParamField>
+
+## Bot struct fields
+
+```go
+type Bot struct {
+    Me      *User
+    Token   string
+    URL     string
+    Updates chan Update
+    Poller  Poller
+    // ...
+}
+```
+
+<ParamField path="Me" type="*User">
+  The bot's own `User` object, populated by `getMe` during `NewBot`.
+</ParamField>
+
+<ParamField path="Token" type="string">
+  The bot token as passed in `Settings`.
+</ParamField>
+
+<ParamField path="URL" type="string">
+  The base API URL in use.
+</ParamField>
+
+<ParamField path="Updates" type="chan Update">
+  Buffered channel that receives raw `Update` objects from the poller. The bot's main loop reads from this channel in `Start()`.
+</ParamField>
+
+<ParamField path="Poller" type="Poller">
+  The active poller instance responsible for fetching updates.
+</ParamField>
+
+## Lifecycle
+
+<Steps>
+  <Step title="Create the bot">
+    Call `NewBot(settings)`. This validates your token, sets `Bot.Me`, and wires up the internal update channel.
+
+    ```go
+    b, err := tele.NewBot(tele.Settings{
+        Token:  os.Getenv("TOKEN"),
+        Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+    })
+    ```
+  </Step>
+  <Step title="Register handlers">
+    Call `b.Handle()` for each command or event you want to react to.
+
+    ```go
+    b.Handle("/start", onStart)
+    b.Handle(tele.OnText, onText)
+    ```
+  </Step>
+  <Step title="Start polling">
+    Call `b.Start()`. This is a **blocking** call — it runs the poller and dispatches updates until `b.Stop()` is called.
+
+    ```go
+    b.Start() // blocks here
+    ```
+  </Step>
+  <Step title="Stop gracefully">
+    Call `b.Stop()` from another goroutine (e.g. in a signal handler). It waits for the poller to drain and returns only after a clean shutdown.
+
+    ```go
+    c := make(chan os.Signal, 1)
+    signal.Notify(c, os.Interrupt)
+    go func() {
+        <-c
+        b.Stop()
+    }()
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  `b.Start()` panics if `Bot.Poller` is `nil`. Always set a poller in `Settings` or assign one directly before calling `Start()`.
+</Warning>
+
+## The `API` interface
+
+`Bot` implements the `API` interface defined in `api.go`. This interface exposes every method that talks to the Telegram Bot API — `Send`, `Edit`, `Delete`, `Answer`, `Respond`, and many more.
+
+The `Context.Bot()` method returns `API` rather than `*Bot`, which makes handlers easy to test by substituting a mock implementation:
+
+```go
+type API interface {
+    Send(to Recipient, what interface{}, opts ...interface{}) (*Message, error)
+    Edit(msg Editable, what interface{}, opts ...interface{}) (*Message, error)
+    Delete(msg Editable) error
+    Answer(query *Query, resp *QueryResponse) error
+    Respond(c *Callback, resp ...*CallbackResponse) error
+    Raw(method string, payload interface{}) ([]byte, error)
+    // ... and many more
+}
+```
+
+## Handler groups
+
+Use `b.Group()` to create a sub-router that shares a common set of middleware without affecting other handlers:
+
+```go
+func (b *Bot) Group() *Group
+```
+
+```go
+admin := b.Group()
+admin.Use(middleware.Whitelist(adminIDs...))
+
+admin.Handle("/ban", onBan)
+admin.Handle("/kick", onKick)
+```
+
+Handlers registered on a `*Group` are stored in the same underlying `Bot.handlers` map. The group only wraps its middleware around those handlers. See the [Middleware](/concepts/middleware) page for full details.
+
+<Tip>
+  You can call `b.Group()` as many times as you like. Each returned `*Group` has its own independent middleware chain.
+</Tip>

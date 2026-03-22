@@ -1,0 +1,1243 @@
+---
+title: "Bot"
+description: "Complete API reference for the Bot type in Telebot v4."
+---
+
+The `Bot` struct is the central object in Telebot. It holds your token, poller, registered handlers, and exposes every method you need to interact with the Telegram Bot API.
+
+## Constructor
+
+### `NewBot`
+
+```go
+func NewBot(pref Settings) (*Bot, error)
+```
+
+Creates and returns a new `Bot` instance. It calls `getMe` to verify the token with Telegram unless `Settings.Offline` is `true`.
+
+<ParamField path="pref" type="Settings" required>
+  Configuration for the bot. See [Settings](/api/settings) for all fields.
+</ParamField>
+
+**Returns** `(*Bot, error)` — a ready-to-use bot, or an error if the token is invalid or the Telegram API is unreachable.
+
+```go
+b, err := tele.NewBot(tele.Settings{
+    Token:  os.Getenv("TOKEN"),
+    Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+---
+
+## Bot Fields
+
+The following fields on `*Bot` are exported and safe to read after construction.
+
+| Field | Type | Description |
+|---|---|---|
+| `Me` | `*User` | The bot's own Telegram user object, populated by `getMe` on startup. |
+| `Token` | `string` | The bot API token. |
+| `URL` | `string` | The Telegram API base URL (defaults to `https://api.telegram.org`). |
+| `Updates` | `chan Update` | Buffered channel receiving incoming updates from the poller. |
+| `Poller` | `Poller` | The active update provider. |
+
+---
+
+## Lifecycle
+
+### `b.Start()`
+
+```go
+func (b *Bot) Start()
+```
+
+Starts the bot by launching the poller and entering the update dispatch loop. **This call blocks** until `b.Stop()` is called.
+
+<Note>
+  `Start` panics if `b.Poller` is `nil`. Always set a poller in `Settings` before calling `Start`.
+</Note>
+
+```go
+b.Start() // blocks until Stop() is called
+```
+
+---
+
+### `b.Stop()`
+
+```go
+func (b *Bot) Stop()
+```
+
+Gracefully shuts down the poller and waits for it to finish. Unblocks `b.Start()`.
+
+```go
+go b.Start()
+// ... later:
+b.Stop()
+```
+
+---
+
+## Routing
+
+### `b.Handle()`
+
+```go
+func (b *Bot) Handle(endpoint interface{}, h HandlerFunc, m ...MiddlewareFunc)
+```
+
+Registers a handler for a given endpoint. The endpoint can be a slash command string (`"/start"`), a Telebot event constant (`tele.OnText`), or any type that implements `CallbackEndpoint` (e.g. `*InlineButton`).
+
+<ParamField path="endpoint" type="interface{}" required>
+  A `string` command/event name or a `CallbackEndpoint` (e.g. `*InlineButton`, `*Btn`).
+</ParamField>
+
+<ParamField path="h" type="HandlerFunc" required>
+  The handler function with signature `func(tele.Context) error`.
+</ParamField>
+
+<ParamField path="m" type="...MiddlewareFunc">
+  Optional per-handler middleware applied only to this route.
+</ParamField>
+
+```go
+// Command
+b.Handle("/start", func(c tele.Context) error {
+    return c.Reply("Hello!")
+})
+
+// Event
+b.Handle(tele.OnText, func(c tele.Context) error {
+    return c.Send("You said: " + c.Text())
+})
+
+// Inline button
+var btn tele.InlineButton
+b.Handle(&btn, func(c tele.Context) error {
+    return c.Respond(&tele.CallbackResponse{Text: "Clicked!"})
+}, myMiddleware)
+```
+
+<Note>
+  Panics with `"telebot: unsupported endpoint"` if the endpoint type is not recognized.
+</Note>
+
+---
+
+### `b.Use()`
+
+```go
+func (b *Bot) Use(middleware ...MiddlewareFunc)
+```
+
+Adds one or more middleware functions to the **global** bot middleware chain. Global middleware runs for every handler.
+
+<ParamField path="middleware" type="...MiddlewareFunc" required>
+  Middleware functions with signature `func(HandlerFunc) HandlerFunc`.
+</ParamField>
+
+```go
+b.Use(myLogger, myAuthChecker)
+```
+
+---
+
+### `b.Group()`
+
+```go
+func (b *Bot) Group() *Group
+```
+
+Creates and returns a new `*Group` that shares the bot's handler registry. Middleware added to a group applies only to handlers registered on that group.
+
+```go
+admin := b.Group()
+admin.Use(adminOnly)
+admin.Handle("/ban", onBan)
+admin.Handle("/kick", onKick)
+```
+
+---
+
+### `b.Trigger()`
+
+```go
+func (b *Bot) Trigger(endpoint interface{}, c Context) error
+```
+
+Executes the registered handler for the given endpoint directly, bypassing the update loop. Useful for manual dispatch or testing.
+
+<ParamField path="endpoint" type="interface{}" required>
+  The same endpoint value used in `Handle`.
+</ParamField>
+
+<ParamField path="c" type="Context" required>
+  The context to pass to the handler.
+</ParamField>
+
+---
+
+## Sending Messages
+
+### `b.Send()`
+
+```go
+func (b *Bot) Send(to Recipient, what interface{}, opts ...interface{}) (*Message, error)
+```
+
+Sends a message to any `Recipient`. The `what` argument can be a plain `string` or any type implementing the `Sendable` interface (e.g. `*Photo`, `*Document`, `*Audio`, etc.).
+
+<ParamField path="to" type="Recipient" required>
+  Destination chat. Any type implementing `Recipient` (`*Chat`, `*User`, etc.).
+</ParamField>
+
+<ParamField path="what" type="interface{}" required>
+  A `string` for text messages, or a `Sendable` media object.
+</ParamField>
+
+<ParamField path="opts" type="...interface{}">
+  Optional send options: `*SendOptions`, `*ReplyMarkup`, `Option` flags (`tele.Silent`, `tele.NoPreview`, …), or a `ParseMode`.
+</ParamField>
+
+<ResponseField name="*Message" type="*Message">
+  The sent message on success.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  `ErrBadRecipient` if `to` is nil; a Telegram API error otherwise.
+</ResponseField>
+
+```go
+msg, err := b.Send(chat, "Hello, world!")
+
+// With parse mode
+msg, err := b.Send(chat, "<b>Bold</b>", tele.ModeHTML)
+
+// Silent with markup
+msg, err := b.Send(chat, "Pick one:", tele.Silent, &markup)
+
+// Send a photo
+msg, err := b.Send(chat, &tele.Photo{File: tele.FromDisk("img.png")})
+```
+
+---
+
+### `b.SendAlbum()`
+
+```go
+func (b *Bot) SendAlbum(to Recipient, a Album, opts ...interface{}) ([]Message, error)
+```
+
+Sends multiple media items as a single grouped message (media album). Captions should be set on the first `Inputtable` item. Only `tele.Silent` is supported from the option set.
+
+<ParamField path="to" type="Recipient" required>
+  Destination chat.
+</ParamField>
+
+<ParamField path="a" type="Album" required>
+  A slice of `Inputtable` media items (e.g. `[]tele.Inputtable{&photo, &video}`).
+</ParamField>
+
+<ParamField path="opts" type="...interface{}">
+  Optional send options (only `tele.Silent` is applied).
+</ParamField>
+
+<ResponseField name="[]Message" type="[]Message">
+  The sent messages.
+</ResponseField>
+
+```go
+album := tele.Album{
+    &tele.Photo{File: tele.FromDisk("a.jpg"), Caption: "My album"},
+    &tele.Photo{File: tele.FromDisk("b.jpg")},
+}
+msgs, err := b.SendAlbum(chat, album)
+```
+
+---
+
+### `b.SendPaidMedia()`
+
+```go
+func (b *Bot) SendPaidMedia(to Recipient, stars int, a PaidAlbum, opts ...interface{}) (*Message, error)
+```
+
+Sends multiple paid media items (requiring Telegram Stars) as a single message.
+
+<ParamField path="to" type="Recipient" required>
+  Destination chat.
+</ParamField>
+
+<ParamField path="stars" type="int" required>
+  Number of Telegram Stars required to view the media.
+</ParamField>
+
+<ParamField path="a" type="PaidAlbum" required>
+  A slice of `PaidInputtable` items.
+</ParamField>
+
+<ParamField path="opts" type="...interface{}">
+  Optional send options.
+</ParamField>
+
+---
+
+### `b.Reply()`
+
+```go
+func (b *Bot) Reply(to *Message, what interface{}, opts ...interface{}) (*Message, error)
+```
+
+Behaves like `Send()` but marks the outgoing message as a reply to `to`. Panics if `to` is nil.
+
+<ParamField path="to" type="*Message" required>
+  The message to reply to.
+</ParamField>
+
+<ParamField path="what" type="interface{}" required>
+  Content to send (same as `Send`).
+</ParamField>
+
+<ParamField path="opts" type="...interface{}">
+  Optional send options.
+</ParamField>
+
+```go
+b.Handle(tele.OnText, func(c tele.Context) error {
+    return b.Reply(c.Message(), "Got it!")
+})
+```
+
+---
+
+### `b.Forward()`
+
+```go
+func (b *Bot) Forward(to Recipient, msg Editable, opts ...interface{}) (*Message, error)
+```
+
+Forwards an existing message to a recipient. Supports the `tele.Silent` option. Panics if `msg` is nil.
+
+<ParamField path="to" type="Recipient" required>
+  Destination chat.
+</ParamField>
+
+<ParamField path="msg" type="Editable" required>
+  The message to forward.
+</ParamField>
+
+<ParamField path="opts" type="...interface{}">
+  Optional: `tele.Silent`, and optionally an `int64` video start timestamp (Bot API 8.3).
+</ParamField>
+
+---
+
+### `b.ForwardMany()`
+
+```go
+func (b *Bot) ForwardMany(to Recipient, msgs []Editable, opts ...*SendOptions) ([]Message, error)
+```
+
+Forwards multiple messages simultaneously. Skips messages that cannot be found or forwarded. Album grouping is preserved.
+
+---
+
+### `b.Copy()`
+
+```go
+func (b *Bot) Copy(to Recipient, msg Editable, opts ...interface{}) (*Message, error)
+```
+
+Like `Forward()`, but the copied message does not include a link back to the original. Panics if `msg` is nil.
+
+---
+
+### `b.CopyMany()`
+
+```go
+func (b *Bot) CopyMany(to Recipient, msgs []Editable, opts ...*SendOptions) ([]Message, error)
+```
+
+Copies multiple messages without a link to the originals. Album grouping is preserved.
+
+---
+
+## Editing Messages
+
+### `b.Edit()`
+
+```go
+func (b *Bot) Edit(msg Editable, what interface{}, opts ...interface{}) (*Message, error)
+```
+
+Edits a previously sent message. The `what` argument determines the edit mode:
+
+- `string` → edits the message text (`editMessageText`)
+- `Location` → updates a live location (`editMessageLiveLocation`)
+- `*ReplyMarkup` → delegates to `EditReplyMarkup`
+- `Inputtable` → delegates to `EditMedia`
+
+If the message was sent by the bot, returns the updated `*Message`; otherwise returns `nil` and `ErrTrueResult`.
+
+<ParamField path="msg" type="Editable" required>
+  The message to edit. Panics if nil.
+</ParamField>
+
+<ParamField path="what" type="interface{}" required>
+  New content: `string`, `Location`, `*ReplyMarkup`, or `Inputtable`.
+</ParamField>
+
+<ParamField path="opts" type="...interface{}">
+  Optional send options (parse mode, entities, etc.).
+</ParamField>
+
+```go
+b.Edit(m, "Updated text")
+b.Edit(m, "New <b>bold</b> text", tele.ModeHTML)
+b.Edit(m, &tele.ReplyMarkup{}) // clears inline keyboard
+b.Edit(m, &tele.Photo{File: tele.FromDisk("new.jpg")})
+```
+
+---
+
+### `b.EditCaption()`
+
+```go
+func (b *Bot) EditCaption(msg Editable, caption string, opts ...interface{}) (*Message, error)
+```
+
+Edits the caption of a media message. Panics if `msg` is nil.
+
+<ParamField path="msg" type="Editable" required>
+  The media message whose caption to edit.
+</ParamField>
+
+<ParamField path="caption" type="string" required>
+  New caption text.
+</ParamField>
+
+<ParamField path="opts" type="...interface{}">
+  Optional: parse mode, entities.
+</ParamField>
+
+---
+
+### `b.EditReplyMarkup()`
+
+```go
+func (b *Bot) EditReplyMarkup(msg Editable, markup *ReplyMarkup) (*Message, error)
+```
+
+Replaces the inline keyboard of a message. Pass `nil` or an empty `*ReplyMarkup` to remove the keyboard entirely.
+
+<ParamField path="msg" type="Editable" required>
+  The message whose reply markup to edit.
+</ParamField>
+
+<ParamField path="markup" type="*ReplyMarkup" required>
+  New inline keyboard markup. Pass `nil` to delete.
+</ParamField>
+
+---
+
+### `b.EditMedia()`
+
+```go
+func (b *Bot) EditMedia(msg Editable, media Inputtable, opts ...interface{}) (*Message, error)
+```
+
+Replaces the media content (photo, video, audio, document, animation) of a message.
+
+<ParamField path="msg" type="Editable" required>
+  The media message to edit.
+</ParamField>
+
+<ParamField path="media" type="Inputtable" required>
+  The new media item.
+</ParamField>
+
+```go
+b.EditMedia(m, &tele.Photo{File: tele.FromDisk("chicken.jpg")})
+b.EditMedia(m, &tele.Video{File: tele.FromURL("http://example.com/v.mp4")})
+```
+
+---
+
+## Deleting Messages
+
+### `b.Delete()`
+
+```go
+func (b *Bot) Delete(msg Editable) error
+```
+
+Deletes a message. Panics if `msg` is nil.
+
+Constraints:
+- Messages can only be deleted within 48 hours of sending.
+- Bots can delete their own outgoing messages in private chats, groups, and supergroups.
+- Bots can delete incoming messages in private chats.
+- Admins can delete any message in the groups/channels they manage.
+
+<ParamField path="msg" type="Editable" required>
+  The message to delete.
+</ParamField>
+
+---
+
+### `b.DeleteMany()`
+
+```go
+func (b *Bot) DeleteMany(msgs []Editable) error
+```
+
+Deletes multiple messages simultaneously. Skips messages that cannot be found.
+
+<ParamField path="msgs" type="[]Editable" required>
+  Messages to delete. All must belong to the same chat.
+</ParamField>
+
+---
+
+## Chat Actions
+
+### `b.Notify()`
+
+```go
+func (b *Bot) Notify(to Recipient, action ChatAction, threadID ...int) error
+```
+
+Broadcasts a typing/upload indicator to the chat. The indicator disappears after 5 seconds or when the bot sends its next message.
+
+<ParamField path="to" type="Recipient" required>
+  The target chat.
+</ParamField>
+
+<ParamField path="action" type="ChatAction" required>
+  One of the `ChatAction` constants:
+
+  | Constant | Value |
+  |---|---|
+  | `tele.Typing` | `"typing"` |
+  | `tele.UploadingPhoto` | `"upload_photo"` |
+  | `tele.UploadingVideo` | `"upload_video"` |
+  | `tele.UploadingAudio` | `"upload_audio"` |
+  | `tele.UploadingDocument` | `"upload_document"` |
+  | `tele.UploadingVNote` | `"upload_video_note"` |
+  | `tele.RecordingVideo` | `"record_video"` |
+  | `tele.RecordingAudio` | `"record_audio"` |
+  | `tele.RecordingVNote` | `"record_video_note"` |
+  | `tele.FindingLocation` | `"find_location"` |
+  | `tele.ChoosingSticker` | `"choose_sticker"` |
+</ParamField>
+
+<ParamField path="threadID" type="...int">
+  Optional message thread ID for forum supergroups.
+</ParamField>
+
+```go
+b.Notify(chat, tele.Typing)
+```
+
+---
+
+## File Operations
+
+### `b.FileByID()`
+
+```go
+func (b *Bot) FileByID(fileID string) (File, error)
+```
+
+Fetches a full `File` object (including `FilePath`) from Telegram's servers using the file's ID. Telegram-provided `File` objects usually lack `FilePath` until this is called.
+
+<ParamField path="fileID" type="string" required>
+  The Telegram file ID.
+</ParamField>
+
+<ResponseField name="File" type="File">
+  Full file object with `FilePath` populated.
+</ResponseField>
+
+---
+
+### `b.File()`
+
+```go
+func (b *Bot) File(file *File) (io.ReadCloser, error)
+```
+
+Downloads the content of a file from Telegram servers and returns a readable stream. The caller must close the returned `io.ReadCloser`.
+
+<ParamField path="file" type="*File" required>
+  A file object with a valid `FileID`. `FilePath` will be populated on this object after the call.
+</ParamField>
+
+<ResponseField name="io.ReadCloser" type="io.ReadCloser">
+  Open HTTP response body. Must be closed by the caller.
+</ResponseField>
+
+---
+
+### `b.Download()`
+
+```go
+func (b *Bot) Download(file *File, localFilename string) error
+```
+
+Downloads a file from Telegram servers and saves it to disk. Maximum file size is 20 MB. Sets `file.FileLocal` to `localFilename` on success.
+
+<ParamField path="file" type="*File" required>
+  File to download. Must have a valid `FileID`.
+</ParamField>
+
+<ParamField path="localFilename" type="string" required>
+  Destination path on the local filesystem.
+</ParamField>
+
+```go
+file, _ := b.FileByID(msg.Document.FileID)
+err := b.Download(&file, "/tmp/doc.pdf")
+```
+
+---
+
+## Commands
+
+### `b.SetCommands()`
+
+```go
+func (b *Bot) SetCommands(opts ...interface{}) error
+```
+
+Updates the bot's command list shown in the Telegram client. Accepts a combination of `[]Command`, `CommandScope`, and `string` (language code).
+
+<ParamField path="opts" type="...interface{}">
+  Any of:
+  - `[]Command` — the new command list
+  - `CommandScope` — scope to apply the commands to
+  - `string` — BCP-47 language code (e.g. `"en"`)
+</ParamField>
+
+```go
+err := b.SetCommands([]tele.Command{
+    {Text: "start", Description: "Start the bot"},
+    {Text: "help",  Description: "Show help"},
+})
+
+// Scoped to a specific chat
+err = b.SetCommands(
+    []tele.Command{{Text: "ban", Description: "Ban a user"}},
+    tele.CommandScope{Type: tele.CommandScopeChat, ChatID: adminChatID},
+    "en",
+)
+```
+
+---
+
+### `b.DeleteCommands()`
+
+```go
+func (b *Bot) DeleteCommands(opts ...interface{}) error
+```
+
+Deletes the bot's command list for the given scope and language. Accepts the same optional arguments as `SetCommands` (without `[]Command`).
+
+<ParamField path="opts" type="...interface{}">
+  Optional `CommandScope` and/or `string` language code.
+</ParamField>
+
+---
+
+### `b.Commands()`
+
+```go
+func (b *Bot) Commands(opts ...interface{}) ([]Command, error)
+```
+
+Returns the current list of bot commands for the given scope and language.
+
+<ParamField path="opts" type="...interface{}">
+  Optional `CommandScope` and/or `string` language code.
+</ParamField>
+
+<ResponseField name="[]Command" type="[]Command">
+  The list of registered commands.
+</ResponseField>
+
+---
+
+## Polls & Live Locations
+
+### `b.StopPoll()`
+
+```go
+func (b *Bot) StopPoll(msg Editable, opts ...interface{}) (*Poll, error)
+```
+
+Stops a poll sent by the bot. Returns the final `*Poll` object with results. Supports `*ReplyMarkup`. Panics if `msg` is nil.
+
+---
+
+### `b.StopLiveLocation()`
+
+```go
+func (b *Bot) StopLiveLocation(msg Editable, opts ...interface{}) (*Message, error)
+```
+
+Stops broadcasting a live location before `Location.LivePeriod` expires. Supports `*ReplyMarkup`. Panics if `msg` is nil.
+
+---
+
+## Chat Management
+
+### `b.Pin()`
+
+```go
+func (b *Bot) Pin(msg Editable, opts ...interface{}) error
+```
+
+Pins a message in a supergroup or channel. Supports `tele.Silent`. Panics if `msg` is nil.
+
+---
+
+### `b.Unpin()`
+
+```go
+func (b *Bot) Unpin(chat Recipient, messageID ...int) error
+```
+
+Unpins a message (or the most recently pinned message if no `messageID` is given) in a supergroup or channel.
+
+---
+
+### `b.UnpinAll()`
+
+```go
+func (b *Bot) UnpinAll(chat Recipient) error
+```
+
+Unpins all pinned messages in a supergroup or channel.
+
+---
+
+### `b.Leave()`
+
+```go
+func (b *Bot) Leave(chat Recipient) error
+```
+
+Makes the bot leave a group, supergroup, or channel.
+
+---
+
+### `b.ChatByID()`
+
+```go
+func (b *Bot) ChatByID(id int64) (*Chat, error)
+```
+
+Fetches chat info by numeric ID.
+
+---
+
+### `b.ChatByUsername()`
+
+```go
+func (b *Bot) ChatByUsername(name string) (*Chat, error)
+```
+
+Fetches chat info by `@username` or numeric ID string.
+
+---
+
+### `b.ChatFullInfo()`
+
+```go
+func (b *Bot) ChatFullInfo(chat Recipient) (*ChatFullInfo, error)
+```
+
+Fetches full information about a chat using `getChat`.
+
+---
+
+### `b.ChatMemberOf()`
+
+```go
+func (b *Bot) ChatMemberOf(chat, user Recipient) (*ChatMember, error)
+```
+
+Returns information about a specific member of a chat.
+
+---
+
+### `b.ProfilePhotosOf()`
+
+```go
+func (b *Bot) ProfilePhotosOf(user *User) ([]Photo, error)
+```
+
+Returns the list of profile photos for a user.
+
+---
+
+## Callbacks & Queries
+
+### `b.Respond()`
+
+```go
+func (b *Bot) Respond(c *Callback, resp ...*CallbackResponse) error
+```
+
+Answers a callback query. A callback can only be answered once; subsequent attempts will return an error.
+
+<ParamField path="c" type="*Callback" required>
+  The callback to respond to.
+</ParamField>
+
+<ParamField path="resp" type="...*CallbackResponse">
+  Optional response parameters. Defaults to an empty acknowledgment.
+</ParamField>
+
+```go
+b.Handle(tele.OnCallback, func(c tele.Context) error {
+    return b.Respond(c.Callback(), &tele.CallbackResponse{
+        Text:      "Done!",
+        ShowAlert: true,
+    })
+})
+```
+
+---
+
+### `b.Answer()`
+
+```go
+func (b *Bot) Answer(query *Query, resp *QueryResponse) error
+```
+
+Responds to an inline query with a list of results. Each query can only be answered once.
+
+---
+
+### `b.AnswerWebApp()`
+
+```go
+func (b *Bot) AnswerWebApp(query *Query, r Result) (*WebAppMessage, error)
+```
+
+Sends a response to a query originating from a Web App. Returns information about the sent inline message.
+
+---
+
+## Payments
+
+### `b.Ship()`
+
+```go
+func (b *Bot) Ship(query *ShippingQuery, what ...interface{}) error
+```
+
+Answers a shipping query. Pass nothing or shipping options for success; pass a `string` to indicate an error.
+
+```go
+b.Ship(query)                    // OK, no shipping options
+b.Ship(query, opt1, opt2)        // OK with options
+b.Ship(query, "Address invalid") // Error response
+```
+
+---
+
+### `b.Accept()`
+
+```go
+func (b *Bot) Accept(query *PreCheckoutQuery, errorMessage ...string) error
+```
+
+Finalizes a pre-checkout query. Pass no arguments to confirm, or pass an error message string to reject.
+
+---
+
+### `b.StarTransactions()`
+
+```go
+func (b *Bot) StarTransactions(offset, limit int) ([]StarTransaction, error)
+```
+
+Returns Telegram Star transactions for the bot.
+
+---
+
+## Admin Methods
+
+These methods require the bot to have appropriate administrator rights.
+
+### `b.Ban()`
+
+```go
+func (b *Bot) Ban(chat *Chat, member *ChatMember, revokeMessages ...bool) error
+```
+
+Bans a user from a chat until `member.RestrictedUntil`. Pass `revokeMessages: true` to also delete all messages sent by the user in the chat.
+
+<ParamField path="chat" type="*Chat" required>
+  The chat to ban the user from.
+</ParamField>
+
+<ParamField path="member" type="*ChatMember" required>
+  The member to ban. Uses `member.RestrictedUntil` as the ban expiry Unix timestamp. Use `tele.Forever()` for a permanent ban.
+</ParamField>
+
+<ParamField path="revokeMessages" type="...bool">
+  If `true`, deletes all messages from this user in the chat.
+</ParamField>
+
+```go
+member := &tele.ChatMember{
+    User:            targetUser,
+    RestrictedUntil: tele.Forever(),
+}
+b.Ban(chat, member)
+```
+
+---
+
+### `b.Unban()`
+
+```go
+func (b *Bot) Unban(chat *Chat, user *User, forBanned ...bool) error
+```
+
+Unbans a user. By default, kicks non-banned users to ensure they are not chat members but can still rejoin. Pass `forBanned: true` to only act on actually banned users.
+
+<ParamField path="chat" type="*Chat" required>
+  The chat to unban from.
+</ParamField>
+
+<ParamField path="user" type="*User" required>
+  The user to unban.
+</ParamField>
+
+<ParamField path="forBanned" type="...bool">
+  If `true`, only unbans users that are currently banned (ignores others).
+</ParamField>
+
+---
+
+### `b.Restrict()`
+
+```go
+func (b *Bot) Restrict(chat *Chat, member *ChatMember) error
+```
+
+Restricts a member's permissions until `member.RestrictedUntil`. Use `tele.NoRestrictions()` to lift all restrictions.
+
+<ParamField path="chat" type="*Chat" required>
+  The target chat.
+</ParamField>
+
+<ParamField path="member" type="*ChatMember" required>
+  Member with updated `Rights` and `RestrictedUntil` set. Set `Rights.Independent = true` to use independent permission evaluation.
+</ParamField>
+
+```go
+member.Rights = tele.NoRestrictions()
+b.Restrict(chat, member)
+```
+
+---
+
+### `b.Promote()`
+
+```go
+func (b *Bot) Promote(chat *Chat, member *ChatMember) error
+```
+
+Updates a member's administrator privileges. Use `tele.AdminRights()` to grant full admin access, or `tele.NoRights()` to demote.
+
+<ParamField path="chat" type="*Chat" required>
+  The target chat.
+</ParamField>
+
+<ParamField path="member" type="*ChatMember" required>
+  Member with the desired `Rights` and optionally `Anonymous: true`.
+</ParamField>
+
+```go
+member.Rights = tele.AdminRights()
+b.Promote(chat, member)
+```
+
+---
+
+### `b.AdminsOf()`
+
+```go
+func (b *Bot) AdminsOf(chat *Chat) ([]ChatMember, error)
+```
+
+Returns all administrators of a chat (excluding other bots). If no admins were appointed in a group, only the creator is returned.
+
+---
+
+### `b.Len()`
+
+```go
+func (b *Bot) Len(chat *Chat) (int, error)
+```
+
+Returns the number of members in the chat.
+
+---
+
+### `b.SetAdminTitle()`
+
+```go
+func (b *Bot) SetAdminTitle(chat *Chat, user *User, title string) error
+```
+
+Sets a custom title for an administrator. The title must be 0–16 characters, no emoji.
+
+---
+
+### `b.BanSenderChat()`
+
+```go
+func (b *Bot) BanSenderChat(chat *Chat, sender Recipient) error
+```
+
+Bans a channel from posting in a supergroup or channel. The owner of the banned channel will not be able to send messages on behalf of any of their channels.
+
+---
+
+### `b.UnbanSenderChat()`
+
+```go
+func (b *Bot) UnbanSenderChat(chat *Chat, sender Recipient) error
+```
+
+Unbans a previously banned sender chat.
+
+---
+
+### `b.DefaultRights()`
+
+```go
+func (b *Bot) DefaultRights(forChannels bool) (*Rights, error)
+```
+
+Returns the bot's current default administrator rights.
+
+<ParamField path="forChannels" type="bool" required>
+  If `true`, returns rights for channels; otherwise for groups.
+</ParamField>
+
+---
+
+### `b.SetDefaultRights()`
+
+```go
+func (b *Bot) SetDefaultRights(rights Rights, forChannels bool) error
+```
+
+Updates the bot's default administrator rights for groups or channels.
+
+---
+
+## Menu Buttons
+
+### `b.MenuButton()`
+
+```go
+func (b *Bot) MenuButton(chat *User) (*MenuButton, error)
+```
+
+Returns the current menu button for a private chat, or the default menu button if not set.
+
+---
+
+### `b.SetMenuButton()`
+
+```go
+func (b *Bot) SetMenuButton(chat *User, mb interface{}) error
+```
+
+Changes the bot's menu button. Accepts a `MenuButtonType` for simple buttons or a full `*MenuButton` struct for Web App buttons. Pass `nil` for `chat` to set the default.
+
+---
+
+## Bot Identity
+
+### `b.SetMyName()`
+
+```go
+func (b *Bot) SetMyName(name, language string) error
+```
+
+Changes the bot's display name for the given language code.
+
+---
+
+### `b.MyName()`
+
+```go
+func (b *Bot) MyName(language string) (*BotInfo, error)
+```
+
+Returns the bot's current name for the given language.
+
+---
+
+### `b.SetMyDescription()`
+
+```go
+func (b *Bot) SetMyDescription(desc, language string) error
+```
+
+Changes the bot's description (shown in empty chats) for the given language.
+
+---
+
+### `b.MyDescription()`
+
+```go
+func (b *Bot) MyDescription(language string) (*BotInfo, error)
+```
+
+Returns the bot's current description for the given language.
+
+---
+
+### `b.SetMyShortDescription()`
+
+```go
+func (b *Bot) SetMyShortDescription(desc, language string) error
+```
+
+Changes the bot's short description (shown on the profile page) for the given language.
+
+---
+
+### `b.MyShortDescription()`
+
+```go
+func (b *Bot) MyShortDescription(language string) (*BotInfo, error)
+```
+
+Returns the bot's current short description for the given language.
+
+---
+
+## Server Control
+
+### `b.Logout()`
+
+```go
+func (b *Bot) Logout() (bool, error)
+```
+
+Logs the bot out of the cloud Bot API server. Use before switching to a local server.
+
+---
+
+### `b.Close()`
+
+```go
+func (b *Bot) Close() (bool, error)
+```
+
+Closes the bot instance. Use before moving the bot from one local server to another.
+
+---
+
+## Manual Processing
+
+### `b.ProcessUpdate()`
+
+```go
+func (b *Bot) ProcessUpdate(u Update)
+```
+
+Processes a single `Update` by creating a context and dispatching it through the registered handlers. Useful for webhook or custom poller implementations where you feed updates manually.
+
+<ParamField path="u" type="Update" required>
+  The incoming update to process.
+</ParamField>
+
+```go
+// In a webhook handler:
+var u tele.Update
+json.NewDecoder(r.Body).Decode(&u)
+b.ProcessUpdate(u)
+```
+
+---
+
+### `b.ProcessContext()`
+
+```go
+func (b *Bot) ProcessContext(c Context)
+```
+
+Lower-level variant of `ProcessUpdate`. Dispatches a pre-built `Context` through the handler routing logic.
+
+---
+
+### `b.NewContext()`
+
+```go
+func (b *Bot) NewContext(u Update) Context
+```
+
+Creates a new `Context` wrapping the given `Update`. Useful when implementing custom pollers or testing handlers directly.
+
+---
+
+## Error Handling
+
+### `b.OnError()`
+
+```go
+func (b *Bot) OnError(err error, c Context)
+```
+
+Invokes the configured error handler (`Settings.OnError`). Called automatically when a handler returns an error. `c` may be `nil` for non-handler errors.
+
+The default implementation logs to `log.Println`. Override it via `Settings.OnError`:
+
+```go
+tele.Settings{
+    OnError: func(err error, c tele.Context) {
+        log.Printf("[%d] handler error: %v", c.Update().ID, err)
+    },
+}
+```
+
+---
+
+## Miscellaneous
+
+### `b.SetUserEmojiStatus()`
+
+```go
+func (b *Bot) SetUserEmojiStatus(user Recipient, emojiStatusCustomEmojiID string, expirationDate ...int64) error
+```
+
+Changes the emoji status for a user who previously granted the bot permission to manage their emoji status via a Mini App.
+
+### `b.NewMarkup()`
+
+```go
+func (b *Bot) NewMarkup() *ReplyMarkup
+```
+
+Returns a new, empty `*ReplyMarkup` instance.
+
+### `b.Raw()`
+
+See `bot_raw.go`. Sends a raw request to the Telegram Bot API by method name and returns the raw JSON response body.

@@ -1,0 +1,283 @@
+---
+title: "Middleware"
+description: "Global, group, and per-handler middleware with the MiddlewareFunc type, b.Use(), Group.Use(), and built-in middleware."
+---
+
+Middleware in Telebot wraps `HandlerFunc` values, letting you intercept every request before (and after) your handler runs. This is the standard place for cross-cutting concerns: logging, authentication, rate-limiting, panic recovery, and more.
+
+## MiddlewareFunc
+
+```go
+// MiddlewareFunc represents a middleware processing function,
+// which get called before the endpoint group or specific handler.
+type MiddlewareFunc func(HandlerFunc) HandlerFunc
+```
+
+A middleware receives `next HandlerFunc` and returns a new `HandlerFunc`. Call `next(c)` to proceed to the next middleware or final handler, or return early to short-circuit.
+
+**Minimal example:**
+
+```go
+func LoggingMiddleware(next tele.HandlerFunc) tele.HandlerFunc {
+    return func(c tele.Context) error {
+        log.Printf("update %d from %d", c.Update().ID, c.Sender().ID)
+        return next(c)
+    }
+}
+```
+
+## Middleware scopes
+
+Telebot has three levels at which middleware can be applied. They are combined in order: global → group → per-handler.
+
+<CardGroup cols={3}>
+  <Card title="Global" icon="globe">
+    Applied to every handler registered on the bot.
+    ```go
+    b.Use(middleware.Logger())
+    ```
+  </Card>
+  <Card title="Group" icon="layer-group">
+    Applied to all handlers within a `*Group`.
+    ```go
+    g := b.Group()
+    g.Use(authMiddleware)
+    g.Handle("/profile", onProfile)
+    ```
+  </Card>
+  <Card title="Per-handler" icon="hand-point-right">
+    Applied only to a single endpoint.
+    ```go
+    b.Handle("/ban", onBan,
+        middleware.Whitelist(adminIDs...),
+    )
+    ```
+  </Card>
+</CardGroup>
+
+### Global middleware — `b.Use`
+
+```go
+// Use adds middleware to the global bot chain.
+func (b *Bot) Use(middleware ...MiddlewareFunc)
+```
+
+Global middleware runs for every single handler registered on the bot, regardless of which group or endpoint triggered it.
+
+```go
+b.Use(
+    middleware.Logger(),
+    middleware.Recover(),
+)
+```
+
+### Group middleware — `g.Use`
+
+```go
+// Group is a separated group of handlers, united by the general middleware.
+type Group struct { ... }
+
+// Use adds middleware to the chain.
+func (g *Group) Use(middleware ...MiddlewareFunc)
+
+// Handle adds endpoint handler to the bot, combining group's middleware
+// with the optional given middleware.
+func (g *Group) Handle(endpoint interface{}, h HandlerFunc, m ...MiddlewareFunc)
+```
+
+Group middleware only wraps the handlers registered through that specific `*Group`:
+
+```go
+adminGroup := b.Group()
+adminGroup.Use(requireAdmin)
+
+adminGroup.Handle("/ban", onBan)
+adminGroup.Handle("/kick", onKick)
+adminGroup.Handle("/promote", onPromote)
+
+// /start is NOT affected by requireAdmin
+b.Handle("/start", onStart)
+```
+
+### Per-handler middleware
+
+Pass extra `MiddlewareFunc` values as variadic arguments to `Handle`:
+
+```go
+b.Handle("/secret", onSecret, middleware.Whitelist(trustedIDs...))
+```
+
+When both group and per-handler middleware are present, they are concatenated: group middleware runs first, then per-handler middleware.
+
+## Writing custom middleware
+
+Here is a complete authentication middleware that stores a database user in the context and blocks unknown users:
+
+```go
+func RequireUser(db *DB) tele.MiddlewareFunc {
+    return func(next tele.HandlerFunc) tele.HandlerFunc {
+        return func(c tele.Context) error {
+            sender := c.Sender()
+            if sender == nil {
+                return nil // ignore anonymous updates
+            }
+
+            user, err := db.FindUser(sender.ID)
+            if err != nil {
+                return c.Send("You are not registered. Use /register first.")
+            }
+
+            c.Set("user", user)
+            return next(c)
+        }
+    }
+}
+
+// Usage:
+b.Use(RequireUser(db))
+```
+
+<Tip>
+  Use `c.Set` / `c.Get` to pass values from middleware to handlers. See the [Context](/concepts/context) page for details.
+</Tip>
+
+## Built-in middleware package
+
+Telebot ships a `middleware` sub-package at `gopkg.in/telebot.v4/middleware` with ready-to-use middleware functions.
+
+```go
+import "gopkg.in/telebot.v4/middleware"
+```
+
+### Logger
+
+```go
+// Logger returns a middleware that logs incoming updates.
+// If no custom logger provided, log.Default() will be used.
+func Logger(logger ...*log.Logger) tele.MiddlewareFunc
+```
+
+Logs the full JSON representation of each incoming `Update`.
+
+```go
+b.Use(middleware.Logger()) // uses log.Default()
+
+// Custom logger:
+b.Use(middleware.Logger(myLogger))
+```
+
+### AutoRespond
+
+```go
+// AutoRespond returns a middleware that automatically responds
+// to every callback.
+func AutoRespond() tele.MiddlewareFunc
+```
+
+Automatically calls `c.Respond()` after each callback handler returns. Prevents the Telegram client from showing a loading spinner indefinitely.
+
+```go
+b.Use(middleware.AutoRespond())
+```
+
+### Recover
+
+```go
+// Recover returns a middleware that recovers a panic happened in
+// the handler.
+func Recover(onError ...RecoverFunc) tele.MiddlewareFunc
+```
+
+Catches panics in downstream handlers and passes the recovered error to the provided `RecoverFunc` (or `b.OnError` if none is given).
+
+```go
+b.Use(middleware.Recover())
+
+// Custom recover function:
+b.Use(middleware.Recover(func(err error, c tele.Context) {
+    log.Printf("panic in handler: %v", err)
+}))
+```
+
+### Whitelist
+
+```go
+// Whitelist returns a middleware that skips the update for users
+// NOT specified in the chats field.
+func Whitelist(chats ...int64) tele.MiddlewareFunc
+```
+
+Allows only the listed user/chat IDs through. All others are silently ignored.
+
+```go
+b.Handle("/admin", onAdmin, middleware.Whitelist(12345, 67890))
+```
+
+### Blacklist
+
+```go
+// Blacklist returns a middleware that skips the update for users
+// specified in the chats field.
+func Blacklist(chats ...int64) tele.MiddlewareFunc
+```
+
+Blocks the listed user/chat IDs. All others pass through.
+
+```go
+b.Use(middleware.Blacklist(spammerID))
+```
+
+### Restrict
+
+A generalised version of Whitelist/Blacklist that lets you provide custom handlers for matched and unmatched chats:
+
+```go
+// RestrictConfig defines config for Restrict middleware.
+type RestrictConfig struct {
+    Chats []int64
+    In    tele.HandlerFunc // called when chat is in Chats
+    Out   tele.HandlerFunc // called when chat is NOT in Chats
+}
+
+func Restrict(v RestrictConfig) tele.MiddlewareFunc
+```
+
+```go
+b.Use(middleware.Restrict(middleware.RestrictConfig{
+    Chats: allowedGroupIDs,
+    In:    tele.DefaultHandlerFunc, // proceed normally
+    Out: func(c tele.Context) error {
+        return c.Send("This bot is not available in this chat.")
+    },
+}))
+```
+
+### IgnoreVia
+
+```go
+// IgnoreVia returns a middleware that ignores all the
+// "sent via" messages.
+func IgnoreVia() tele.MiddlewareFunc
+```
+
+Drops all messages that were sent via an inline bot (those with a non-nil `Message.Via` field).
+
+```go
+b.Use(middleware.IgnoreVia())
+```
+
+## Execution order
+
+<Note>
+  Middleware is applied in the order it was registered. The first middleware registered runs outermost (first before, last after). Each call to `next(c)` descends one level deeper.
+</Note>
+
+```
+b.Use(A, B)
+b.Handle("/cmd", handler, C)
+
+// Execution order:
+// A → B → C → handler → C (return) → B (return) → A (return)
+```
+
+This means errors propagate back up through the same chain, and deferred logic in outer middleware runs after inner middleware and the handler have completed.

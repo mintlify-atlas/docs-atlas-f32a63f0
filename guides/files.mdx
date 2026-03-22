@@ -1,0 +1,181 @@
+---
+title: "Files"
+description: "Upload files from disk, URL, or io.Reader, cache file IDs, and download files from Telegram."
+---
+
+Telebot represents every file — whether stored on Telegram's servers, on disk, at a URL, or in memory — with the `File` struct.
+
+## The File struct
+
+```go
+type File struct {
+    FileID   string    // Telegram's unique file ID (set after upload)
+    UniqueID string    // Unique across bots; use for deduplication
+    FileSize int64
+    FilePath string    // Server-side path (from getFile)
+    FileLocal string   // Local filesystem path
+    FileURL  string    // Remote URL
+    FileReader io.Reader // In-memory reader
+}
+```
+
+`File` is designed to be embedded into media types (`Photo`, `Audio`, `Video`, etc.), so you set it as a one-liner.
+
+## Creating file references
+
+### FromDisk — upload a local file
+
+```go
+photo := &tele.Photo{File: tele.FromDisk("banner.jpg")}
+_, err := b.Send(recipient, photo)
+```
+
+`tele.FromDisk` sets `FileLocal`; Telebot reads the file and uploads it as a multipart form field.
+
+### FromURL — send by remote URL
+
+```go
+photo := &tele.Photo{File: tele.FromURL("https://example.com/cat.jpg")}
+_, err := b.Send(recipient, photo)
+```
+
+Telegram fetches the resource directly. The file is never downloaded by your bot.
+
+### FromReader — upload from io.Reader
+
+```go
+f, _ := os.Open("report.pdf")
+defer f.Close()
+
+doc := &tele.Document{File: tele.FromReader(f)}
+_, err := b.Send(recipient, doc)
+```
+
+Useful for in-memory buffers (`bytes.Buffer`, `bytes.Reader`, generated files, etc.).
+
+## Checking file state
+
+Two helper methods tell you where the file lives:
+
+```go
+file.InCloud() bool  // true when FileID != ""
+file.OnDisk()  bool  // true when FileLocal exists on the local filesystem
+```
+
+## Sending media
+
+Every media type embeds `File` and implements `Sendable`:
+
+```go
+// Photo
+b.Send(chat, &tele.Photo{
+    File:    tele.FromDisk("photo.jpg"),
+    Caption: "Look at this!",
+})
+
+// Audio
+b.Send(chat, &tele.Audio{
+    File:      tele.FromDisk("song.mp3"),
+    Title:     "My Song",
+    Performer: "Artist",
+    Duration:  213,
+})
+
+// Document
+b.Send(chat, &tele.Document{
+    File:    tele.FromDisk("report.pdf"),
+    Caption: "Q3 Report",
+})
+
+// Video
+b.Send(chat, &tele.Video{
+    File:      tele.FromURL("https://example.com/video.mp4"),
+    Caption:   "Watch this!",
+    Streaming: true,
+})
+
+// Voice note
+b.Send(chat, &tele.Voice{
+    File:     tele.FromDisk("voice.ogg"),
+    Duration: 5,
+})
+
+// Animation (GIF / MP4 without sound)
+b.Send(chat, &tele.Animation{
+    File:     tele.FromDisk("anim.mp4"),
+    FileName: "anim.mp4", // required; omitting may send as document
+})
+```
+
+## File caching with FileID
+
+After a successful upload Telebot automatically writes the returned `FileID` back into the media struct. On subsequent sends you can pass the same struct and Telebot will reuse the cloud ID instead of re-uploading:
+
+```go
+photo := &tele.Photo{File: tele.FromDisk("logo.png")}
+
+// First send — Telegram uploads the file and assigns a FileID
+b.Send(alice, photo)
+// photo.FileID is now populated
+
+// Second send — Telebot sends by FileID; no upload happens
+b.Send(bob, photo)
+```
+
+You can also construct a `File` directly from a known ID:
+
+```go
+photo := &tele.Photo{File: tele.File{FileID: "AgACAgIAAxk..."}}
+b.Send(chat, photo)
+```
+
+<Tip>
+Store `FileID` values in your database after the first upload to avoid re-uploading the same asset on every bot restart.
+</Tip>
+
+## Albums
+
+`b.SendAlbum()` groups up to 10 media items into a single message. All items must implement `Inputtable` (`Photo`, `Video`, `Audio`, `Document`):
+
+```go
+album := tele.Album{
+    &tele.Photo{File: tele.FromDisk("photo1.jpg"), Caption: "First photo"},
+    &tele.Photo{File: tele.FromDisk("photo2.jpg")},
+    &tele.Video{File: tele.FromDisk("clip.mp4")},
+}
+
+msgs, err := b.SendAlbum(chat, album)
+```
+
+<Note>
+Only the first item in an album may carry a caption. `SendAlbum` supports only the `tele.Silent` option.
+</Note>
+
+## Downloading files
+
+Use `b.Download()` to save a Telegram-hosted file to your local disk. It calls `getFile` internally to resolve the download URL:
+
+```go
+b.Handle(tele.OnDocument, func(c tele.Context) error {
+    doc := c.Message().Document
+    if err := b.Download(&doc.File, "/tmp/"+doc.FileName); err != nil {
+        return err
+    }
+    return c.Reply("Saved!")
+})
+```
+
+For streaming access without saving to disk, use `b.File()`:
+
+```go
+reader, err := b.File(&doc.File)
+if err != nil {
+    return err
+}
+defer reader.Close()
+io.Copy(myWriter, reader)
+```
+
+<Warning>
+Telegram limits bot-side downloads to **20 MB**. Larger files must be handled via the MTProto client API.
+</Warning>

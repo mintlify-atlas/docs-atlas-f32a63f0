@@ -1,0 +1,274 @@
+---
+title: "Custom Poller"
+description: "Implement the Poller interface to control how your bot receives updates."
+---
+
+A Poller is the component responsible for feeding `Update` values into the bot. Telebot ships with a long-polling poller and a webhook poller. When neither fits your needs — custom queues, filtered feeds, multi-tenant setups — you can implement your own.
+
+## The Poller Interface
+
+```go
+// Poller is a provider of Updates.
+//
+// All pollers must implement Poll(), which accepts bot
+// pointer and subscription channel and start polling
+// synchronously straight away.
+type Poller interface {
+    // Poll is supposed to take the bot object,
+    // subscription channel and start polling
+    // for Updates immediately.
+    //
+    // Poller must listen for stop constantly and close
+    // it as soon as it's done polling.
+    Poll(b *Bot, updates chan Update, stop chan struct{})
+}
+```
+
+<Note>
+`Poll` is called in a dedicated goroutine by `b.Start()`. It must block until the `stop` channel is closed, then return. The bot signals shutdown by closing `stop`.
+</Note>
+
+### Contract
+
+- **Block** — `Poll` must not return until the bot is stopping.
+- **Respect `stop`** — select on `stop` in every iteration. When `stop` is closed, drain any in-flight work and return.
+- **Write to `updates`** — push `Update` values into the channel; the bot reads them and dispatches to handlers.
+- **Thread safety** — `updates` is a buffered channel; do not close it. Only the bot closes it after `Poll` returns.
+
+## Built-in Pollers
+
+### LongPoller
+
+```go
+// LongPoller is a classic long poller with timeout.
+type LongPoller struct {
+    Limit          int
+    Timeout        time.Duration
+    LastUpdateID   int
+    AllowedUpdates []string `yaml:"allowed_updates"`
+}
+```
+
+```go
+b, _ := tele.NewBot(tele.Settings{
+    Token:  os.Getenv("TOKEN"),
+    Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+})
+```
+
+### Webhook
+
+The `Webhook` struct also implements `Poller`. Pass it as `Poller` in `Settings` and Telebot will open the HTTP listener and register the webhook with Telegram automatically.
+
+```go
+b, _ := tele.NewBot(tele.Settings{
+    Token: os.Getenv("TOKEN"),
+    Poller: &tele.Webhook{
+        Listen: ":8080",
+        Endpoint: &tele.WebhookEndpoint{
+            PublicURL: "https://example.com/bot",
+        },
+    },
+})
+```
+
+## MiddlewarePoller
+
+`MiddlewarePoller` wraps any existing poller with a filter function. Updates that fail the filter are discarded before they reach the bot's handler dispatch.
+
+```go
+// MiddlewarePoller is a special kind of poller that acts
+// like a filter for updates.
+type MiddlewarePoller struct {
+    Capacity int // Default: 1
+    Poller   Poller
+    Filter   func(*Update) bool
+}
+
+// NewMiddlewarePoller constructs a new middleware poller.
+func NewMiddlewarePoller(original Poller, filter func(*Update) bool) *MiddlewarePoller
+```
+
+```go
+base := &tele.LongPoller{Timeout: 10 * time.Second}
+
+poller := tele.NewMiddlewarePoller(base, func(u *tele.Update) bool {
+    // Only process updates from specific chats
+    if u.Message == nil {
+        return true // pass non-message updates through
+    }
+    return allowedChats[u.Message.Chat.ID]
+})
+
+b, _ := tele.NewBot(tele.Settings{
+    Token:  os.Getenv("TOKEN"),
+    Poller: poller,
+})
+```
+
+<Tip>
+Increase `Capacity` for CPU-intensive filter functions to prevent the inner poller from blocking on the intermediate channel.
+</Tip>
+
+## Writing a Custom Poller
+
+<Steps>
+  <Step title="Define a struct">
+    Create a struct that holds your poller's configuration and state.
+
+    ```go
+    type RedisPoller struct {
+        Client *redis.Client
+        Stream string
+    }
+    ```
+  </Step>
+
+  <Step title="Implement Poll">
+    Implement the `Poll` method. Always check `stop` before blocking operations.
+
+    ```go
+    func (p *RedisPoller) Poll(b *tele.Bot, updates chan tele.Update, stop chan struct{}) {
+        for {
+            select {
+            case <-stop:
+                return
+            default:
+            }
+
+            // Block for up to 1 second on the Redis stream
+            msgs, err := p.Client.XRead(ctx, &redis.XReadArgs{
+                Streams: []string{p.Stream, "$"},
+                Count:   10,
+                Block:   time.Second,
+            }).Result()
+            if err == redis.Nil {
+                continue // timeout — loop and check stop again
+            }
+            if err != nil {
+                log.Println("redis poller error:", err)
+                continue
+            }
+
+            for _, msg := range msgs[0].Messages {
+                var u tele.Update
+                if err := json.Unmarshal([]byte(msg.Values["data"].(string)), &u); err != nil {
+                    log.Println("unmarshal error:", err)
+                    continue
+                }
+                updates <- u
+            }
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Register with the bot">
+    Pass the poller in `Settings` before calling `b.Start()`.
+
+    ```go
+    b, err := tele.NewBot(tele.Settings{
+        Token:  os.Getenv("TOKEN"),
+        Poller: &RedisPoller{
+            Client: rdb,
+            Stream: "telegram:updates",
+        },
+    })
+    ```
+  </Step>
+</Steps>
+
+## Filtering Updates at the Poller Level
+
+A filter poller is useful when you want to drop entire update categories before any handler or middleware runs:
+
+```go
+base := &tele.LongPoller{
+    Timeout:        10 * time.Second,
+    AllowedUpdates: tele.AllowedUpdates,
+}
+
+// Only pass through messages and callback queries
+poller := tele.NewMiddlewarePoller(base, func(u *tele.Update) bool {
+    return u.Message != nil || u.Callback != nil
+})
+```
+
+`tele.AllowedUpdates` is a package-level slice listing every update type string that Telegram supports:
+
+```go
+var AllowedUpdates = []string{
+    "message",
+    "edited_message",
+    "channel_post",
+    "edited_channel_post",
+    "message_reaction",
+    "message_reaction_count",
+    "inline_query",
+    "chosen_inline_result",
+    "callback_query",
+    "shipping_query",
+    "pre_checkout_query",
+    "poll",
+    "poll_answer",
+    "my_chat_member",
+    "chat_member",
+    "chat_join_request",
+    "chat_boost",
+    "removed_chat_boost",
+}
+```
+
+## Processing Updates Directly
+
+When running tests or injecting updates from an external source, you can bypass the poller entirely and call `b.ProcessUpdate` directly:
+
+```go
+// ProcessUpdate processes a single Update.
+// This is useful when you want to handle updates manually.
+func (b *Bot) ProcessUpdate(u Update)
+```
+
+```go
+// In a test
+b, _ := tele.NewBot(tele.Settings{Offline: true})
+b.Handle("/start", func(c tele.Context) error {
+    return c.Send("Hello!")
+})
+
+b.ProcessUpdate(tele.Update{
+    ID: 1,
+    Message: &tele.Message{
+        Text:   "/start",
+        Sender: &tele.User{ID: 42},
+        Chat:   &tele.Chat{ID: 42},
+    },
+})
+```
+
+<Note>
+`ProcessUpdate` is synchronous when `Settings.Synchronous` is true, and spawns a goroutine per update otherwise.
+</Note>
+
+## Thread Safety Considerations
+
+- The `updates` channel is the only shared state between the poller and the bot. Writes to it are safe from any goroutine.
+- The bot closes `stop` from a single goroutine; reading from it is safe without a mutex.
+- If your poller spawns worker goroutines, wait for them to finish before returning from `Poll`. Use a `sync.WaitGroup` or a secondary done channel.
+
+```go
+func (p *WorkerPoller) Poll(b *tele.Bot, updates chan tele.Update, stop chan struct{}) {
+    var wg sync.WaitGroup
+
+    for i := 0; i < p.Workers; i++ {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            p.runWorker(updates, stop)
+        }()
+    }
+
+    <-stop          // wait for shutdown signal
+    wg.Wait()       // wait for all workers to drain and exit
+}
+```

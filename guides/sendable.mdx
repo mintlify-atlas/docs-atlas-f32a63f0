@@ -1,0 +1,222 @@
+---
+title: "Sendable"
+description: "Understand the Sendable interface, built-in media types, SendOptions, parse modes, and the Album type."
+---
+
+Anything that can be delivered through `b.Send()` must implement the `Sendable` interface. This lets you define custom compound types that send themselves across multiple messages.
+
+## The Sendable interface
+
+```go
+type Sendable interface {
+    Send(*Bot, Recipient, *SendOptions) (*Message, error)
+}
+```
+
+Passing a `Sendable` to `b.Send()` calls its `Send` method directly:
+
+```go
+func (b *Bot) Send(to Recipient, what interface{}, opts ...interface{}) (*Message, error) {
+    // ...
+    switch object := what.(type) {
+    case string:
+        return b.sendText(to, object, sendOpts)
+    case Sendable:
+        return object.Send(b, to, sendOpts)
+    }
+}
+```
+
+## Built-in sendable types
+
+<CardGroup cols={2}>
+  <Card title="Photo" icon="image">
+    A JPEG/PNG/WebP image. Supports `Caption`, `HasSpoiler`, `CaptionAbove`.
+  </Card>
+  <Card title="Audio" icon="music">
+    An MP3/M4A file. Supports `Title`, `Performer`, `Duration`, `Thumbnail`.
+  </Card>
+  <Card title="Video" icon="video">
+    A video file. Supports `Width`, `Height`, `Duration`, `Streaming`, `Cover`.
+  </Card>
+  <Card title="Document" icon="file">
+    A generic file. Supports `FileName`, `Thumbnail`, `DisableTypeDetection`.
+  </Card>
+  <Card title="Voice" icon="microphone">
+    An OGG voice note. Supports `Caption`, `Duration`.
+  </Card>
+  <Card title="VideoNote" icon="circle-play">
+    A round video note. Supports `Duration`, `Length`, `Thumbnail`.
+  </Card>
+  <Card title="Animation" icon="film">
+    A GIF or MP4 without sound. Requires `FileName` to send as animation.
+  </Card>
+  <Card title="Sticker" icon="face-smile">
+    A WebP/animated sticker. Supports `Emoji`.
+  </Card>
+  <Card title="Location" icon="location-dot">
+    Geographic coordinates with optional live tracking (`LivePeriod`).
+  </Card>
+  <Card title="Venue" icon="building">
+    A location with name, address and optional Foursquare/Google Place ID.
+  </Card>
+  <Card title="Contact" icon="address-card">
+    A phone contact with `PhoneNumber`, `FirstName`, optionally `VCard`.
+  </Card>
+  <Card title="Dice" icon="dice">
+    An animated dice. Available types: `Cube`, `Dart`, `Ball`, `Goal`, `Slot`, `Bowl`.
+  </Card>
+  <Card title="Poll" icon="chart-bar">
+    A poll with `PollRegular` or `PollQuiz` type.
+  </Card>
+  <Card title="Game" icon="gamepad">
+    A Telegram game identified by `Name` (short name).
+  </Card>
+  <Card title="Invoice" icon="file-invoice-dollar">
+    A payment invoice. See the Payments guide.
+  </Card>
+</CardGroup>
+
+## The Recipient interface
+
+Anything with a `Recipient() string` method can receive messages. Telebot implements this for `*User` and `*Chat`:
+
+```go
+type Recipient interface {
+    Recipient() string // Telegram chat_id or @username
+}
+```
+
+Pass a `*tele.User`, `*tele.Chat`, or any custom type that implements the interface:
+
+```go
+b.Send(c.Sender(), "Hello user!")
+b.Send(c.Chat(), "Hello chat!")
+```
+
+## SendOptions
+
+`SendOptions` gives full control over how a message is delivered:
+
+```go
+type SendOptions struct {
+    ReplyTo              *Message
+    ReplyMarkup          *ReplyMarkup
+    DisableWebPagePreview bool
+    DisableNotification  bool
+    ParseMode            ParseMode
+    Entities             Entities
+    AllowWithoutReply    bool
+    Protected            bool
+    ThreadID             int
+    HasSpoiler           bool
+    ReplyParams          *ReplyParams
+    BusinessConnectionID string
+    EffectID             string
+    Payload              string
+    AllowPaidBroadcast   bool
+}
+```
+
+Pass it directly or use shorthand `Option` flags:
+
+```go
+// Full SendOptions
+b.Send(chat, "Secret message", &tele.SendOptions{
+    Protected:           true,
+    DisableNotification: true,
+    ParseMode:           tele.ModeHTML,
+})
+
+// Shorthand flags (can be mixed)
+b.Send(chat, "Quiet message", tele.Silent, tele.Protected)
+```
+
+### Option flags
+
+| Flag | Equivalent SendOptions field |
+|------|-----------------------------|
+| `tele.Silent` | `DisableNotification: true` |
+| `tele.NoPreview` | `DisableWebPagePreview: true` |
+| `tele.Protected` | `Protected: true` |
+| `tele.AllowWithoutReply` | `AllowWithoutReply: true` |
+| `tele.ForceReply` | `ReplyMarkup.ForceReply: true` |
+| `tele.OneTimeKeyboard` | `ReplyMarkup.OneTimeKeyboard: true` |
+| `tele.RemoveKeyboard` | `ReplyMarkup.RemoveKeyboard: true` |
+
+## Parse modes
+
+Control how Telegram renders message text:
+
+```go
+// HTML
+b.Send(chat, "<b>Bold</b> and <i>italic</i>", tele.ModeHTML)
+
+// Markdown (legacy)
+b.Send(chat, "*Bold* and _italic_", tele.ModeMarkdown)
+
+// MarkdownV2 (current spec)
+b.Send(chat, "*Bold* and _italic_", tele.ModeMarkdownV2)
+```
+
+Set a global default in `Settings` to avoid repeating it on every send:
+
+```go
+b, _ := tele.NewBot(tele.Settings{
+    Token:     "TOKEN",
+    ParseMode: tele.ModeHTML,
+    Poller:    &tele.LongPoller{Timeout: 10 * time.Second},
+})
+
+// All sends now use HTML by default
+b.Send(chat, "<b>Hello!</b>")
+```
+
+## Albums
+
+`Album` is a `[]Inputtable` slice. Send it with `b.SendAlbum()`:
+
+```go
+type Album []Inputtable
+
+func (b *Bot) SendAlbum(to Recipient, a Album, opts ...interface{}) ([]Message, error)
+```
+
+Example:
+
+```go
+msgs, err := b.SendAlbum(chat, tele.Album{
+    &tele.Photo{
+        File:    tele.FromDisk("cover.jpg"),
+        Caption: "Album caption goes here",
+    },
+    &tele.Video{File: tele.FromDisk("clip.mp4")},
+    &tele.Photo{File: tele.FromURL("https://example.com/extra.jpg")},
+})
+```
+
+<Note>
+Only the first album item can have a caption. `SendAlbum` only respects the `tele.Silent` option.
+</Note>
+
+## Custom Sendable
+
+Implement `Sendable` to create reusable compound message types:
+
+```go
+type WelcomeCard struct {
+    Username string
+    PhotoURL string
+}
+
+func (w *WelcomeCard) Send(b *tele.Bot, to tele.Recipient, opt *tele.SendOptions) (*tele.Message, error) {
+    photo := &tele.Photo{
+        File:    tele.FromURL(w.PhotoURL),
+        Caption: "Welcome, " + w.Username + "!",
+    }
+    return photo.Send(b, to, opt)
+}
+
+// Usage
+b.Send(chat, &WelcomeCard{Username: "Alice", PhotoURL: "https://example.com/welcome.jpg"})
+```

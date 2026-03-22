@@ -1,0 +1,202 @@
+---
+title: "Commands"
+description: "Handle bot commands, deep links, arguments, and register commands with BotFather."
+---
+
+Commands are the primary way users interact with Telegram bots. Telebot routes them through the same `Handle()` mechanism used for all other endpoints.
+
+## Basic command handling
+
+Register a handler for a command by passing the `/command` string as the endpoint:
+
+```go
+b.Handle("/start", func(c tele.Context) error {
+    return c.Send("Welcome! Use /help to see available commands.")
+})
+
+b.Handle("/help", func(c tele.Context) error {
+    return c.Send("Here is what I can do...")
+})
+```
+
+The handler receives a `Context` that wraps the incoming update. Telebot matches the command text using the regex `^(/\w+)(@(\w+))?(\s|$)(.+)?`, so only exact `/command` prefixes are routed.
+
+## Group-addressed commands
+
+In group chats, users can address commands to a specific bot: `/command@botname`. Telebot handles this automatically — it matches `/start` and `/start@mybot` to the same handler, provided the bot username matches `b.Me.Username`.
+
+You do not need to register separate handlers for the `@botname` variants.
+
+```go
+// Handles both "/start" and "/start@mybot" in groups
+b.Handle("/start", func(c tele.Context) error {
+    return c.Reply("Hello!")
+})
+```
+
+## Deep linking with /start
+
+Telegram supports deep links via `t.me/botname?start=PAYLOAD`. When a user follows such a link, the bot receives a `/start` message with the payload appended.
+
+Read the payload via `c.Message().Payload`:
+
+```go
+b.Handle("/start", func(c tele.Context) error {
+    payload := c.Message().Payload
+    if payload == "" {
+        return c.Send("Hello!")
+    }
+    // e.g. payload == "ref_123" from t.me/mybot?start=ref_123
+    return c.Send("You came from referral: " + payload)
+})
+```
+
+<Note>
+`c.Message().Payload` contains everything after the command text and a single space. For `/start ref_123`, `Payload` is `"ref_123"`.
+</Note>
+
+## Multiple arguments with c.Args()
+
+`c.Args()` splits the message payload by whitespace and returns a `[]string`. This is useful when a command accepts several arguments:
+
+```go
+b.Handle("/echo", func(c tele.Context) error {
+    args := c.Args()
+    if len(args) == 0 {
+        return c.Send("Usage: /echo <text>")
+    }
+    return c.Send(strings.Join(args, " "))
+})
+```
+
+For callback buttons, `c.Args()` splits by `|` instead — the same function works across contexts.
+
+## Setting bot commands
+
+Register the command list displayed in Telegram's UI via `b.SetCommands()`. Commands are passed as a `[]tele.Command` slice along with optional scope and language parameters.
+
+```go
+commands := []tele.Command{
+    {Text: "start",   Description: "Start the bot"},
+    {Text: "help",    Description: "Show help"},
+    {Text: "settings", Description: "Open settings"},
+}
+
+// Set for all users in all chats (default scope)
+if err := b.SetCommands(commands); err != nil {
+    log.Fatal(err)
+}
+```
+
+You can scope commands to specific contexts using `tele.CommandScope`:
+
+```go
+// Admin-only commands visible only in a specific chat
+adminScope := tele.CommandScope{
+    Type:   tele.CommandScopeChatAdmin,
+    ChatID: -1001234567890,
+}
+
+adminCmds := []tele.Command{
+    {Text: "ban",  Description: "Ban a user"},
+    {Text: "kick", Description: "Kick a user"},
+}
+
+b.SetCommands(adminCmds, adminScope)
+```
+
+### Available scope types
+
+<CardGroup cols={2}>
+  <Card title="CommandScopeDefault" icon="globe">
+    All chats — the default fallback scope.
+  </Card>
+  <Card title="CommandScopeAllPrivateChats" icon="user">
+    All private conversations with the bot.
+  </Card>
+  <Card title="CommandScopeAllGroupChats" icon="users">
+    All group and supergroup chats.
+  </Card>
+  <Card title="CommandScopeAllChatAdmin" icon="shield">
+    All chat administrators across groups.
+  </Card>
+  <Card title="CommandScopeChat" icon="message">
+    A specific chat identified by `ChatID`.
+  </Card>
+  <Card title="CommandScopeChatAdmin" icon="crown">
+    Administrators of a specific chat.
+  </Card>
+  <Card title="CommandScopeChatMember" icon="person">
+    A specific member in a specific chat (`ChatID` + `UserID`).
+  </Card>
+</CardGroup>
+
+### Retrieving and deleting commands
+
+```go
+// Get the current command list
+cmds, err := b.Commands()
+
+// Delete commands for the default scope
+b.DeleteCommands()
+
+// Delete scoped commands
+b.DeleteCommands(tele.CommandScope{Type: tele.CommandScopeAllGroupChats})
+```
+
+### Language-specific commands
+
+Pass a BCP-47 language code string to serve localised command menus:
+
+```go
+russianCmds := []tele.Command{
+    {Text: "start", Description: "Запустить бота"},
+}
+b.SetCommands(russianCmds, "ru")
+```
+
+## Full example
+
+```go
+package main
+
+import (
+    "log"
+    "strings"
+    "time"
+
+    tele "gopkg.in/telebot.v4"
+)
+
+func main() {
+    b, err := tele.NewBot(tele.Settings{
+        Token:  "TOKEN",
+        Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    b.Handle("/start", func(c tele.Context) error {
+        if payload := c.Message().Payload; payload != "" {
+            return c.Send("Deep link payload: " + payload)
+        }
+        return c.Send("Hello!")
+    })
+
+    b.Handle("/echo", func(c tele.Context) error {
+        args := c.Args()
+        if len(args) == 0 {
+            return c.Reply("Send me some text after /echo")
+        }
+        return c.Reply(strings.Join(args, " "))
+    })
+
+    _ = b.SetCommands([]tele.Command{
+        {Text: "start", Description: "Start the bot"},
+        {Text: "echo",  Description: "Echo your text"},
+    })
+
+    b.Start()
+}
+```

@@ -1,0 +1,170 @@
+---
+title: "Introduction"
+description: "Telebot is an ergonomic Go framework for building Telegram bots — not a 1:1 API wrapper, but a thoughtfully designed toolkit focused on clean, concise code."
+---
+
+## What is Telebot?
+
+Telebot (`gopkg.in/telebot.v4`) is a Go framework for the [Telegram Bot API](https://core.telegram.org/bots/api). Rather than exposing every raw API method directly, Telebot makes deliberate design choices to keep your bot code readable and maintainable. As the README puts it: instead of making a 1:1 API wrapper, the focus is on the beauty of the API and performance.
+
+The result is a framework where the most common operations — receiving messages, responding to commands, handling callbacks, sending media — collapse into a few expressive lines.
+
+```go
+package main
+
+import (
+	"time"
+	tele "gopkg.in/telebot.v4"
+)
+
+func main() {
+	b, _ := tele.NewBot(tele.Settings{
+		Token:  "...",
+		Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+	})
+
+	b.Handle("/start", func(c tele.Context) error {
+		return c.Send("Hello world!")
+	})
+
+	b.Start()
+}
+```
+
+## Philosophy
+
+Telebot is built around a few core ideas:
+
+**Ergonomics over completeness.** The API surface is deliberately shaped around what you actually need to do — not around the Telegram Bot API spec. Repetitive boilerplate is eliminated wherever possible.
+
+**Concurrency by default.** Handlers run in goroutines by default, making Telebot suitable for high-load bots without any extra configuration. Set `Synchronous: true` in `Settings` if you need sequential processing.
+
+**Extensibility without churn.** The `Poller` interface, `Sendable` interface, `Editable` interface, and middleware system are all designed so you can extend the framework without touching its internals or breaking backwards compatibility.
+
+## Why Telebot?
+
+| Concern | Telebot's approach |
+|---|---|
+| Routing | String commands, event constants, and button pointers all work as endpoints in `Handle()` |
+| Middleware | Simple `MiddlewareFunc` chain — global, group-scoped, or handler-scoped |
+| Keyboards | Unified `ReplyMarkup` builder for both reply and inline keyboards |
+| Files | Transparent upload/download; automatic FileID caching on first send |
+| Error handling | Configurable `OnError` callback in `Settings`; handlers return plain `error` |
+| Testing | `Offline: true` in `Settings` skips the `getMe` API call so bots can be constructed without a network |
+
+## Architecture overview
+
+A Telebot bot is composed of five building blocks:
+
+### Bot
+
+`*Bot` is the central object. It holds the token, the HTTP client, the update channel, and the handler map. You create one with `NewBot`:
+
+```go
+b, err := tele.NewBot(tele.Settings{
+	Token:  os.Getenv("TOKEN"),
+	Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+})
+```
+
+Once created, `b.Start()` begins consuming updates from the configured `Poller` and dispatching them to registered handlers.
+
+### Context
+
+`Context` wraps an incoming `Update` and exposes helpers that work regardless of update type. Instead of branching on whether the update is a message, a callback, or an inline query, you call the same methods:
+
+```go
+c.Sender()   // *User — the sender, whatever the update type
+c.Message()  // *Message — nil if not applicable
+c.Text()     // string — message text
+c.Args()     // []string — command arguments split by space
+c.Send(...)  // reply shorthand
+c.Edit(...)  // edit shorthand
+c.Respond()  // callback response shorthand
+```
+
+Handlers always have the signature `func(tele.Context) error`.
+
+### Handlers
+
+Handlers are registered with `b.Handle(endpoint, handlerFunc)`. The endpoint can be:
+
+- A **command string** like `"/start"` or `"/help"`
+- A **telebot event constant** like `tele.OnText`, `tele.OnPhoto`, `tele.OnCallback`
+- A **pointer to a button** (`&btnHelp`) for keyboard-driven routing
+
+See [telebot.go](https://pkg.go.dev/gopkg.in/telebot.v4#pkg-constants) for the full list of event constants.
+
+### Middleware
+
+`MiddlewareFunc` has the type `func(HandlerFunc) HandlerFunc`. Middleware can be applied at three scopes:
+
+```go
+// Global — applies to all handlers
+b.Use(middleware.Logger())
+
+// Group — applies to a subset of handlers
+adminOnly := b.Group()
+adminOnly.Use(middleware.Whitelist(adminIDs...))
+adminOnly.Handle("/ban", onBan)
+
+// Handler — applies to one handler only
+b.Handle(tele.OnText, onText, middleware.IgnoreVia())
+```
+
+### Poller
+
+The `Poller` interface decouples update delivery from the rest of the framework:
+
+```go
+type Poller interface {
+	Poll(b *Bot, updates chan Update, stop chan struct{})
+}
+```
+
+Telebot ships with `LongPoller` (polling via `getUpdates`) and `Webhook` (push via HTTPS). You can implement the interface yourself to receive updates from any source.
+
+## Feature highlights
+
+<Columns cols={2}>
+  <Card title="Command routing" icon="terminal">
+    Route `/command` and `/command@botname` transparently. Extract payload and space-separated arguments with `c.Message().Payload` and `c.Args()`.
+  </Card>
+  <Card title="Rich middleware" icon="filter">
+    Chain `MiddlewareFunc` handlers globally, per group, or per handler. Ships with `Logger`, `AutoRespond`, `Whitelist`, `Blacklist`, and `IgnoreVia` out of the box.
+  </Card>
+  <Card title="Transparent file API" icon="file">
+    Send files from disk or URL with `tele.FromDisk()` / `tele.FromURL()`. Telebot uploads automatically on first send and caches the Telegram `FileID` for subsequent sends.
+  </Card>
+  <Card title="Keyboard builders" icon="layout-grid">
+    Build reply and inline keyboards with a unified `ReplyMarkup` constructor. Inline buttons double as `Handle()` endpoints — no manual callback string parsing needed.
+  </Card>
+  <Card title="Inline mode" icon="search">
+    Handle `tele.OnQuery` and respond with typed result objects (`PhotoResult`, `ArticleResult`, etc.) through `c.Answer()`.
+  </Card>
+  <Card title="Editable messages" icon="pencil">
+    Any struct that implements `MessageSig() (int, int64)` can be passed to `b.Edit()` or `b.Delete()` — including your own database model structs.
+  </Card>
+  <Card title="Concurrent by default" icon="zap">
+    Handlers run in goroutines. The updates channel capacity (default 100) and `Synchronous` mode are both configurable in `Settings`.
+  </Card>
+  <Card title="Webhook support" icon="webhook">
+    Drop in a `Webhook` poller for production deployments. Telebot handles TLS, port binding, and update delivery — you only configure the URL.
+  </Card>
+</Columns>
+
+## Package import
+
+The module path and import alias used throughout this documentation:
+
+```go
+import (
+	tele "gopkg.in/telebot.v4"
+)
+```
+
+The canonical module name is `gopkg.in/telebot.v4`. The `tele` alias is a convention — you can use any alias you prefer.
+
+## Ready to build?
+
+Head to the [Quickstart](/quickstart) to go from zero to a working bot in under five minutes.

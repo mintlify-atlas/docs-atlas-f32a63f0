@@ -1,0 +1,295 @@
+---
+title: "Context"
+description: "The Context interface — wrapping an incoming Update with helpers for reading data and sending responses."
+---
+
+Every handler in Telebot receives a single `Context` argument. It wraps the raw `Update` together with a reference to the bot, and provides a rich set of accessor and send helpers so you rarely need to touch the underlying `Update` struct directly.
+
+## HandlerFunc
+
+```go
+type HandlerFunc func(Context) error
+```
+
+All handlers have this signature. Return `nil` on success, or a non-nil error to trigger the bot's `OnError` callback.
+
+## What Context wraps
+
+```go
+// NewContext returns a new native context object,
+// field by the passed update.
+func NewContext(b API, u Update) Context
+```
+
+Internally, the native context stores:
+- `b API` — the bot instance (or any mock that satisfies `API`)
+- `u Update` — the raw Telegram update
+- A thread-safe `map[string]interface{}` for arbitrary per-request values
+
+You receive a `Context` in every handler; you can also construct one manually for testing:
+
+```go
+c := tele.NewContext(bot, tele.Update{
+    Message: &tele.Message{Text: "hello"},
+})
+```
+
+## Update accessors
+
+These methods extract the relevant payload from the wrapped `Update`. They return `nil` (or zero values) when the update does not contain that type of data.
+
+<CardGroup cols={2}>
+  <Card title="Bot()" icon="robot">
+    Returns the `API` instance the context is bound to.
+    ```go
+    bot := c.Bot() // tele.API
+    ```
+  </Card>
+  <Card title="Update()" icon="bolt">
+    Returns the raw `Update` struct.
+    ```go
+    upd := c.Update() // tele.Update
+    ```
+  </Card>
+  <Card title="Message()" icon="message">
+    Returns the associated `*Message`. Works for plain messages, callback messages, channel posts, and edited messages.
+    ```go
+    msg := c.Message() // *tele.Message
+    ```
+  </Card>
+  <Card title="Callback()" icon="hand-pointer">
+    Returns `*Callback` when the update is a button press.
+    ```go
+    cb := c.Callback() // *tele.Callback
+    ```
+  </Card>
+  <Card title="Query()" icon="magnifying-glass">
+    Returns `*Query` for inline queries.
+    ```go
+    q := c.Query() // *tele.Query
+    ```
+  </Card>
+  <Card title="Sender()" icon="user">
+    Returns the `*User` who triggered the update, regardless of update type. Returns `nil` for anonymous updates.
+    ```go
+    user := c.Sender() // *tele.User
+    ```
+  </Card>
+  <Card title="Chat()" icon="comments">
+    Returns the `*Chat` associated with the current update.
+    ```go
+    chat := c.Chat() // *tele.Chat
+    ```
+  </Card>
+  <Card title="Recipient()" icon="inbox">
+    Combines `Chat()` and `Sender()`. Returns `Chat` if available, otherwise `Sender`. Never returns nil for native contexts.
+    ```go
+    r := c.Recipient() // tele.Recipient
+    ```
+  </Card>
+</CardGroup>
+
+### Text and data
+
+```go
+// Text returns the message text or caption.
+func (c Context) Text() string
+
+// Data returns context-dependent payload:
+//   - command payload (text after the command)
+//   - callback data string
+//   - inline query text
+//   - shipping/pre-checkout payload
+func (c Context) Data() string
+
+// Args splits Data() into a slice:
+//   - message payload split by whitespace
+//   - callback data split by "|"
+func (c Context) Args() []string
+
+// Entities returns message entities or caption entities.
+func (c Context) Entities() Entities
+
+// ThreadID returns the message thread (topic) ID, or 0.
+func (c Context) ThreadID() int
+```
+
+**Example — reading a command argument:**
+
+```go
+b.Handle("/greet", func(c tele.Context) error {
+    name := c.Data() // e.g. "/greet Alice" → "Alice"
+    if name == "" {
+        name = c.Sender().FirstName
+    }
+    return c.Send("Hello, " + name + "!")
+})
+```
+
+### Specialised update accessors
+
+| Method | Returns | When present |
+|---|---|---|
+| `InlineResult()` | `*InlineResult` | `OnInlineResult` |
+| `ShippingQuery()` | `*ShippingQuery` | `OnShipping` |
+| `PreCheckoutQuery()` | `*PreCheckoutQuery` | `OnCheckout` |
+| `Payment()` | `*Payment` | `OnPayment` |
+| `Poll()` | `*Poll` | `OnPoll` |
+| `PollAnswer()` | `*PollAnswer` | `OnPollAnswer` |
+| `ChatMember()` | `*ChatMemberUpdate` | `OnChatMember`, `OnMyChatMember` |
+| `ChatJoinRequest()` | `*ChatJoinRequest` | `OnChatJoinRequest` |
+| `Migration()` | `(int64, int64)` | `OnMigration` |
+| `Topic()` | `*Topic` | `OnTopicCreated`, etc. |
+| `Boost()` | `*BoostUpdated` | `OnBoost` |
+| `BoostRemoved()` | `*BoostRemoved` | `OnBoostRemoved` |
+| `PurchasedPaidMedia()` | `*PaidMediaPurchased` | `OnPurchasedPaidMedia` |
+
+## Sending helpers
+
+All send helpers target the current recipient (from `c.Recipient()`) automatically.
+
+### Send and Reply
+
+```go
+// Send sends a message to the current recipient.
+func (c Context) Send(what interface{}, opts ...interface{}) error
+
+// SendAlbum sends a media album to the current recipient.
+func (c Context) SendAlbum(a Album, opts ...interface{}) error
+
+// Reply sends a message as a reply to the current message.
+func (c Context) Reply(what interface{}, opts ...interface{}) error
+```
+
+```go
+b.Handle(tele.OnText, func(c tele.Context) error {
+    return c.Reply("You said: " + c.Text())
+})
+```
+
+### Forward
+
+```go
+// Forward forwards msg to the current recipient.
+func (c Context) Forward(msg tele.Editable, opts ...interface{}) error
+
+// ForwardTo forwards the current message to another recipient.
+func (c Context) ForwardTo(to tele.Recipient, opts ...interface{}) error
+```
+
+### Edit
+
+```go
+// Edit edits the current message (must be a callback or inline result context).
+func (c Context) Edit(what interface{}, opts ...interface{}) error
+
+// EditCaption edits only the caption of the current message.
+func (c Context) EditCaption(caption string, opts ...interface{}) error
+
+// EditOrSend edits if possible, otherwise sends a new message.
+func (c Context) EditOrSend(what interface{}, opts ...interface{}) error
+
+// EditOrReply edits if possible, otherwise replies.
+func (c Context) EditOrReply(what interface{}, opts ...interface{}) error
+```
+
+<Tip>
+  `EditOrSend` and `EditOrReply` are especially useful for handlers that can be reached from both commands and callback buttons.
+</Tip>
+
+### Delete
+
+```go
+// Delete removes the current message.
+func (c Context) Delete() error
+
+// DeleteAfter schedules deletion after duration d.
+// Returns a *time.Timer that can be cancelled with .Stop().
+func (c Context) DeleteAfter(d time.Duration) *time.Timer
+```
+
+### Callbacks and inline queries
+
+```go
+// Respond sends a response for the current callback query.
+func (c Context) Respond(resp ...*CallbackResponse) error
+
+// RespondText sends a popup notification for the current callback.
+func (c Context) RespondText(text string) error
+
+// RespondAlert sends an alert dialog for the current callback.
+func (c Context) RespondAlert(text string) error
+
+// Answer sends a response to the current inline query.
+func (c Context) Answer(resp *QueryResponse) error
+```
+
+```go
+b.Handle(tele.OnCallback, func(c tele.Context) error {
+    return c.RespondText("Got it!")
+})
+
+b.Handle(tele.OnQuery, func(c tele.Context) error {
+    return c.Answer(&tele.QueryResponse{
+        Results: tele.Results{...},
+    })
+})
+```
+
+### Payments
+
+```go
+// Ship replies to a shipping query with available shipping options.
+func (c Context) Ship(what ...interface{}) error
+
+// Accept finalises a pre-checkout query.
+func (c Context) Accept(errorMessage ...string) error
+```
+
+### Notify
+
+```go
+// Notify sends a chat action ("typing", "upload_photo", etc.).
+func (c Context) Notify(action ChatAction) error
+```
+
+```go
+b.Handle("/upload", func(c tele.Context) error {
+    c.Notify(tele.UploadingDocument)
+    // ... do the upload ...
+    return c.Send(doc)
+})
+```
+
+## Storing custom values: Get / Set
+
+`Context` has a built-in thread-safe key/value store. Use it to pass data between middleware and handlers without global state.
+
+```go
+// Set saves a value under key.
+func (c Context) Set(key string, val interface{})
+
+// Get retrieves the value stored under key.
+func (c Context) Get(key string) interface{}
+```
+
+**Example — middleware sets a value, handler reads it:**
+
+```go
+func AuthMiddleware(next tele.HandlerFunc) tele.HandlerFunc {
+    return func(c tele.Context) error {
+        user := db.FindUser(c.Sender().ID)
+        c.Set("user", user)
+        return next(c)
+    }
+}
+
+b.Handle("/profile", func(c tele.Context) error {
+    user := c.Get("user").(*User)
+    return c.Send("Your name: " + user.Name)
+}, AuthMiddleware)
+```
+
+<Note>
+  `Get` returns `nil` (not a panic) when the key does not exist. Always perform a nil check or type assertion guard before using the value.
+</Note>

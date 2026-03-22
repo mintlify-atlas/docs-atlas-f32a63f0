@@ -1,0 +1,320 @@
+---
+title: "Update"
+description: "Reference for the Update struct, all update fields, and the event endpoint constants."
+---
+
+The `Update` struct represents a single incoming Telegram update. Each update contains exactly one populated field.
+
+## Update
+
+```go
+type Update struct {
+    ID int `json:"update_id"`
+
+    Message                 *Message                 `json:"message,omitempty"`
+    EditedMessage           *Message                 `json:"edited_message,omitempty"`
+    ChannelPost             *Message                 `json:"channel_post,omitempty"`
+    EditedChannelPost       *Message                 `json:"edited_channel_post,omitempty"`
+    MessageReaction         *MessageReaction         `json:"message_reaction"`
+    MessageReactionCount    *MessageReactionCount    `json:"message_reaction_count"`
+    Callback                *Callback                `json:"callback_query,omitempty"`
+    Query                   *Query                   `json:"inline_query,omitempty"`
+    InlineResult            *InlineResult            `json:"chosen_inline_result,omitempty"`
+    ShippingQuery           *ShippingQuery           `json:"shipping_query,omitempty"`
+    PreCheckoutQuery        *PreCheckoutQuery        `json:"pre_checkout_query,omitempty"`
+    Poll                    *Poll                    `json:"poll,omitempty"`
+    PollAnswer              *PollAnswer              `json:"poll_answer,omitempty"`
+    MyChatMember            *ChatMemberUpdate        `json:"my_chat_member,omitempty"`
+    ChatMember              *ChatMemberUpdate        `json:"chat_member,omitempty"`
+    ChatJoinRequest         *ChatJoinRequest         `json:"chat_join_request,omitempty"`
+    Boost                   *BoostUpdated            `json:"chat_boost"`
+    BoostRemoved            *BoostRemoved            `json:"removed_chat_boost"`
+    BusinessConnection      *BusinessConnection      `json:"business_connection"`
+    BusinessMessage         *Message                 `json:"business_message"`
+    EditedBusinessMessage   *Message                 `json:"edited_business_message"`
+    DeletedBusinessMessages *BusinessMessagesDeleted `json:"deleted_business_messages"`
+    PurchasedPaidMedia      *PaidMediaPurchased      `json:"purchased_paid_media"`
+}
+```
+
+### Fields
+
+<ResponseField name="ID" type="int">
+  Unique update identifier. JSON: `update_id`.
+</ResponseField>
+
+<ResponseField name="Message" type="*Message">
+  New incoming message of any kind — text, photo, sticker, etc.
+</ResponseField>
+
+<ResponseField name="EditedMessage" type="*Message">
+  New version of a message that was edited.
+</ResponseField>
+
+<ResponseField name="ChannelPost" type="*Message">
+  New channel post of any kind.
+</ResponseField>
+
+<ResponseField name="EditedChannelPost" type="*Message">
+  New version of a channel post that was edited.
+</ResponseField>
+
+<ResponseField name="MessageReaction" type="*MessageReaction">
+  A user changed a reaction on a message.
+</ResponseField>
+
+<ResponseField name="MessageReactionCount" type="*MessageReactionCount">
+  Reactions to a message with anonymous reactions were changed.
+</ResponseField>
+
+<ResponseField name="Callback" type="*Callback">
+  Incoming callback query from an inline keyboard. JSON: `callback_query`.
+</ResponseField>
+
+<ResponseField name="Query" type="*Query">
+  New incoming inline query. JSON: `inline_query`.
+</ResponseField>
+
+<ResponseField name="InlineResult" type="*InlineResult">
+  The result of an inline query chosen by a user. JSON: `chosen_inline_result`.
+</ResponseField>
+
+<ResponseField name="ShippingQuery" type="*ShippingQuery">
+  New incoming shipping query (requires invoices with flexible pricing).
+</ResponseField>
+
+<ResponseField name="PreCheckoutQuery" type="*PreCheckoutQuery">
+  New incoming pre-checkout query (final confirmation before payment).
+</ResponseField>
+
+<ResponseField name="Poll" type="*Poll">
+  New poll state (sent when a poll is stopped or its settings change).
+</ResponseField>
+
+<ResponseField name="PollAnswer" type="*PollAnswer">
+  A user changed their vote in a non-anonymous poll.
+</ResponseField>
+
+<ResponseField name="MyChatMember" type="*ChatMemberUpdate">
+  The bot's chat member status changed in a chat.
+</ResponseField>
+
+<ResponseField name="ChatMember" type="*ChatMemberUpdate">
+  A chat member's status changed. Requires the `chat_member` allowed update type.
+</ResponseField>
+
+<ResponseField name="ChatJoinRequest" type="*ChatJoinRequest">
+  A request to join a chat was sent.
+</ResponseField>
+
+<ResponseField name="Boost" type="*BoostUpdated">
+  A chat boost was added or changed. JSON: `chat_boost`.
+</ResponseField>
+
+<ResponseField name="BoostRemoved" type="*BoostRemoved">
+  A chat boost was removed. JSON: `removed_chat_boost`.
+</ResponseField>
+
+<ResponseField name="BusinessConnection" type="*BusinessConnection">
+  The bot was connected or disconnected from a business account.
+</ResponseField>
+
+<ResponseField name="BusinessMessage" type="*Message">
+  New message from a connected business account.
+</ResponseField>
+
+<ResponseField name="EditedBusinessMessage" type="*Message">
+  New version of a message from a connected business account.
+</ResponseField>
+
+<ResponseField name="DeletedBusinessMessages" type="*BusinessMessagesDeleted">
+  Messages were deleted from a connected business account.
+</ResponseField>
+
+<ResponseField name="PurchasedPaidMedia" type="*PaidMediaPurchased">
+  A user purchased paid media sent by the bot.
+</ResponseField>
+
+---
+
+## Event Endpoint Constants
+
+Telebot maps update fields to string endpoint constants. Register handlers with `b.Handle(endpoint, handlerFunc)`.
+
+### Message Events
+
+| Constant | Trigger |
+|---|---|
+| `OnText` | `Message.Text != ""` (non-command) |
+| `OnForward` | `Message.Origin != nil` |
+| `OnReply` | Text message that is a reply |
+| `OnEdited` | `EditedMessage != nil` |
+| `OnPhoto` | `Message.Photo != nil` |
+| `OnAudio` | `Message.Audio != nil` |
+| `OnAnimation` | `Message.Animation != nil` |
+| `OnDocument` | `Message.Document != nil` |
+| `OnSticker` | `Message.Sticker != nil` |
+| `OnVideo` | `Message.Video != nil` |
+| `OnVoice` | `Message.Voice != nil` |
+| `OnVideoNote` | `Message.VideoNote != nil` |
+| `OnContact` | `Message.Contact != nil` |
+| `OnLocation` | `Message.Location != nil` |
+| `OnVenue` | `Message.Venue != nil` |
+| `OnDice` | `Message.Dice != nil` |
+| `OnInvoice` | `Message.Invoice != nil` |
+| `OnPayment` | `Message.Payment != nil` |
+| `OnRefund` | `Message.RefundedPayment != nil` |
+| `OnGame` | `Message.Game != nil` |
+| `OnPinned` | `Message.PinnedMessage != nil` |
+| `OnMedia` | Any media type not handled by a specific handler |
+
+### Channel and Callback Events
+
+| Constant | Trigger |
+|---|---|
+| `OnChannelPost` | `ChannelPost != nil` |
+| `OnEditedChannelPost` | `EditedChannelPost != nil` |
+| `OnCallback` | `Callback != nil` (unrouted) |
+| `OnQuery` | `Query != nil` |
+| `OnInlineResult` | `InlineResult != nil` |
+| `OnShipping` | `ShippingQuery != nil` |
+| `OnCheckout` | `PreCheckoutQuery != nil` |
+| `OnPoll` | `Poll != nil` |
+| `OnPollAnswer` | `PollAnswer != nil` |
+
+### Group / Chat Events
+
+| Constant | Trigger |
+|---|---|
+| `OnAddedToGroup` | Bot added to a group |
+| `OnUserJoined` | `Message.UserJoined != nil` |
+| `OnUserLeft` | `Message.UserLeft != nil` |
+| `OnUserShared` | `Message.UserShared != nil` |
+| `OnChatShared` | `Message.ChatShared != nil` |
+| `OnNewGroupTitle` | `Message.NewGroupTitle != ""` |
+| `OnNewGroupPhoto` | `Message.NewGroupPhoto != nil` |
+| `OnGroupPhotoDeleted` | `Message.GroupPhotoDeleted == true` |
+| `OnGroupCreated` | `Message.GroupCreated == true` |
+| `OnSuperGroupCreated` | `Message.SuperGroupCreated == true` |
+| `OnChannelCreated` | `Message.ChannelCreated == true` |
+| `OnMigration` | `Message.MigrateTo != 0` |
+| `OnMyChatMember` | `MyChatMember != nil` |
+| `OnChatMember` | `ChatMember != nil` |
+| `OnChatJoinRequest` | `ChatJoinRequest != nil` |
+
+### Forum Topic Events
+
+| Constant | Trigger |
+|---|---|
+| `OnTopicCreated` | `Message.TopicCreated != nil` |
+| `OnTopicReopened` | `Message.TopicReopened != nil` |
+| `OnTopicClosed` | `Message.TopicClosed != nil` |
+| `OnTopicEdited` | `Message.TopicEdited != nil` |
+| `OnGeneralTopicHidden` | `Message.GeneralTopicHidden != nil` |
+| `OnGeneralTopicUnhidden` | `Message.GeneralTopicUnhidden != nil` |
+
+### Boost, Business & Other Events
+
+| Constant | Trigger |
+|---|---|
+| `OnBoost` | `Boost != nil` |
+| `OnBoostRemoved` | `BoostRemoved != nil` |
+| `OnBusinessConnection` | `BusinessConnection != nil` |
+| `OnBusinessMessage` | `BusinessMessage != nil` |
+| `OnEditedBusinessMessage` | `EditedBusinessMessage != nil` |
+| `OnDeletedBusinessMessages` | `DeletedBusinessMessages != nil` |
+| `OnPurchasedPaidMedia` | `PurchasedPaidMedia != nil` |
+| `OnWebApp` | `Message.WebAppData != nil` |
+| `OnProximityAlert` | `Message.ProximityAlert != nil` |
+| `OnAutoDeleteTimer` | `Message.AutoDeleteTimer != nil` |
+| `OnVideoChatStarted` | `Message.VideoChatStarted != nil` |
+| `OnVideoChatEnded` | `Message.VideoChatEnded != nil` |
+| `OnVideoChatParticipants` | `Message.VideoChatParticipants != nil` |
+| `OnVideoChatScheduled` | `Message.VideoChatScheduled != nil` |
+| `OnWriteAccessAllowed` | `Message.WriteAccessAllowed != nil` |
+
+<Note>
+  All Telebot endpoint constants begin with the `\a` (alert) character to avoid collision with real command strings.
+</Note>
+
+---
+
+## AllowedUpdates
+
+`AllowedUpdates` is a package-level slice listing all update type strings you can request from the Telegram API:
+
+```go
+var AllowedUpdates = []string{
+    "message",
+    "edited_message",
+    "channel_post",
+    "edited_channel_post",
+    "message_reaction",
+    "message_reaction_count",
+    "inline_query",
+    "chosen_inline_result",
+    "callback_query",
+    "shipping_query",
+    "pre_checkout_query",
+    "poll",
+    "poll_answer",
+    "my_chat_member",
+    "chat_member",
+    "chat_join_request",
+    "chat_boost",
+    "removed_chat_boost",
+}
+```
+
+Pass a subset of these to `LongPoller.AllowedUpdates` to limit which update types are delivered to your bot:
+
+```go
+pref := tele.Settings{
+    Token: os.Getenv("TOKEN"),
+    Poller: &tele.LongPoller{
+        Timeout:        10 * time.Second,
+        AllowedUpdates: []string{"message", "callback_query"},
+    },
+}
+```
+
+---
+
+## LongPoller
+
+```go
+type LongPoller struct {
+    Limit          int
+    Timeout        time.Duration
+    LastUpdateID   int
+    AllowedUpdates []string `yaml:"allowed_updates"`
+}
+```
+
+The default long-polling implementation. `Limit` sets the maximum number of updates to fetch per request (1–100). `Timeout` is the long-poll timeout in seconds.
+
+## MiddlewarePoller
+
+```go
+type MiddlewarePoller struct {
+    Capacity int
+    Poller   Poller
+    Filter   func(*Update) bool
+}
+
+func NewMiddlewarePoller(original Poller, filter func(*Update) bool) *MiddlewarePoller
+```
+
+Wraps another `Poller` and drops updates for which `Filter` returns `false`. Useful for spam filtering or allowlisting specific chats.
+
+```go
+poller := tele.NewMiddlewarePoller(
+    &tele.LongPoller{Timeout: 10 * time.Second},
+    func(u *tele.Update) bool {
+        if u.Message == nil {
+            return true
+        }
+        return allowedChatIDs[u.Message.Chat.ID]
+    },
+)
+```

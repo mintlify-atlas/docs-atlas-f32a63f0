@@ -1,0 +1,224 @@
+---
+title: "Payments"
+description: "Accept payments, handle shipping and pre-checkout queries, and process Telegram Stars."
+---
+
+Telebot provides a complete implementation of the Telegram Payments API, including traditional fiat payments and the Stars payment system.
+
+## Sending an invoice
+
+Create an `Invoice` and send it with `b.Send()` — `Invoice` implements `Sendable`:
+
+```go
+invoice := &tele.Invoice{
+    Title:       "Premium Subscription",
+    Description: "One month of premium features",
+    Payload:     "sub_monthly",   // your internal identifier
+    Currency:    "USD",
+    Token:       "STRIPE_LIVE_TOKEN", // from @BotFather payment settings
+    Prices: []tele.Price{
+        {Label: "Subscription", Amount: 999}, // $9.99 in cents
+    },
+    // Optional fields
+    NeedName:            true,
+    NeedEmail:           true,
+    NeedShippingAddress: true,
+    Flexible:            true, // enables shipping query
+}
+
+_, err := b.Send(chat, invoice)
+```
+
+### Telegram Stars invoice
+
+For Stars payments set `Currency` to `"XTR"` (available as the `tele.Stars` constant) and `Token` to an empty string:
+
+```go
+starsInvoice := &tele.Invoice{
+    Title:       "Bonus Pack",
+    Description: "50 extra credits",
+    Payload:     "bonus_50",
+    Currency:    tele.Stars, // "XTR"
+    Token:       "",
+    Prices: []tele.Price{
+        {Label: "Bonus Pack", Amount: 50}, // 50 Stars
+    },
+}
+
+_, err := b.Send(chat, starsInvoice)
+```
+
+### Creating payment links
+
+Generate a shareable invoice URL without sending a message:
+
+```go
+link, err := b.CreateInvoiceLink(invoice)
+// link == "https://t.me/$..."
+```
+
+## Handling the shipping query
+
+If the invoice has `Flexible: true`, Telegram sends a shipping query before checkout. Respond with shipping options using `c.Ship()`:
+
+```go
+b.Handle(tele.OnShipping, func(c tele.Context) error {
+    q := c.ShippingQuery()
+    log.Printf("Shipping to %s, %s", q.Address.City, q.Address.CountryCode)
+
+    // Approve with options
+    return c.Ship(
+        tele.ShippingOption{
+            ID:    "standard",
+            Title: "Standard Shipping (3-5 days)",
+            Prices: []tele.Price{
+                {Label: "Shipping", Amount: 500}, // $5.00
+            },
+        },
+        tele.ShippingOption{
+            ID:    "express",
+            Title: "Express Shipping (1-2 days)",
+            Prices: []tele.Price{
+                {Label: "Shipping", Amount: 1500}, // $15.00
+            },
+        },
+    )
+})
+```
+
+To reject shipping to a particular address:
+
+```go
+b.Handle(tele.OnShipping, func(c tele.Context) error {
+    q := c.ShippingQuery()
+    if q.Address.CountryCode == "XX" {
+        return c.Ship("We do not ship to that country.")
+    }
+    return c.Ship(standardOption)
+})
+```
+
+## Handling the pre-checkout query
+
+Telegram sends a `PreCheckoutQuery` once the user confirms the order. You have **10 seconds** to accept or reject it:
+
+```go
+b.Handle(tele.OnCheckout, func(c tele.Context) error {
+    q := c.PreCheckoutQuery()
+    log.Printf("Pre-checkout: %s %s %d",
+        q.Currency, q.Payload, q.Total)
+
+    // Validate stock, pricing, etc.
+    if !inventoryOK(q.Payload) {
+        return c.Accept("Sorry, this item is out of stock.")
+    }
+
+    // Approve with no arguments
+    return c.Accept()
+})
+```
+
+<Warning>
+You **must** respond to `OnCheckout` within 10 seconds or the payment will fail automatically.
+</Warning>
+
+## Handling successful payments
+
+After the user completes payment, Telegram delivers a `Message` with a `Payment` field:
+
+```go
+b.Handle(tele.OnPayment, func(c tele.Context) error {
+    payment := c.Payment()
+    log.Printf(
+        "Payment received: %s %d (charge: %s)",
+        payment.Currency,
+        payment.Total,
+        payment.TelegramChargeID,
+    )
+
+    // Fulfill the order based on payment.Payload
+    if err := fulfillOrder(payment.Payload, c.Sender()); err != nil {
+        return err
+    }
+
+    return c.Send("Thank you for your purchase!")
+})
+```
+
+### Payment fields
+
+```go
+type Payment struct {
+    Currency         string
+    Total            int    // smallest currency unit (cents, etc.)
+    Payload          string // your invoice payload
+    OptionID         string // chosen shipping option ID
+    Order            Order  // buyer's name, email, address
+    TelegramChargeID string
+    ProviderChargeID string
+    // Stars subscriptions (Bot API 8.0+)
+    SubscriptionExpirationDate int64
+    IsRecurring                bool
+    IsFirstRecurring           bool
+}
+```
+
+## Handling purchased paid media (Stars)
+
+When a user purchases paid media sent with `b.SendPaidMedia()`, the bot receives an `OnPurchasedPaidMedia` event:
+
+```go
+b.Handle(tele.OnPurchasedPaidMedia, func(c tele.Context) error {
+    purchase := c.PurchasedPaidMedia()
+    log.Printf("User %d bought media, payload: %s",
+        purchase.From.ID, purchase.Payload)
+    return nil
+})
+```
+
+## Refunding Stars payments
+
+```go
+err := b.RefundStars(user, payment.TelegramChargeID)
+```
+
+## Retrieving Star transactions
+
+```go
+transactions, err := b.StarTransactions(0, 100)
+for _, tx := range transactions {
+    fmt.Printf("%s: %d stars at %s\n",
+        tx.ID, tx.Amount, tx.Time())
+}
+```
+
+## Supported currencies
+
+Telebot ships a `SupportedCurrencies` map (loaded from the official Telegram data) that lets you convert between human amounts and the smallest unit:
+
+```go
+cur := tele.SupportedCurrencies["USD"]
+
+// Convert $9.99 → 999 (cents)
+amount := cur.ToTotal(9.99)
+
+// Convert 999 → 9.99
+human := cur.FromTotal(999)
+```
+
+## Payment flow overview
+
+<Steps>
+  <Step title="Send invoice">
+    Call `b.Send(chat, invoice)` or generate a link with `b.CreateInvoiceLink(invoice)`.
+  </Step>
+  <Step title="Handle shipping (optional)">
+    If `invoice.Flexible == true`, respond to `tele.OnShipping` with `c.Ship(options...)`.
+  </Step>
+  <Step title="Confirm pre-checkout">
+    Respond to `tele.OnCheckout` within 10 seconds using `c.Accept()` or `c.Accept(errorMsg)`.
+  </Step>
+  <Step title="Fulfill on payment">
+    Handle `tele.OnPayment`, read `c.Payment()`, and deliver the goods.
+  </Step>
+</Steps>

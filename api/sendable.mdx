@@ -1,0 +1,302 @@
+---
+title: "Sendable"
+description: "The Sendable interface, Recipient interface, SendOptions, and all built-in sendable media types."
+---
+
+## Sendable interface
+
+Any type that implements `Sendable` can be passed to `b.Send()`:
+
+```go
+type Sendable interface {
+    Send(*Bot, Recipient, *SendOptions) (*Message, error)
+}
+```
+
+You can implement this interface on your own types to create custom sendable objects that span multiple messages or wrap complex media.
+
+## Recipient interface
+
+```go
+type Recipient interface {
+    Recipient() string // must return a valid Telegram chat_id or username
+}
+```
+
+Built-in types implementing `Recipient`: `*User`, `*Chat`, `ChatID` (int64 alias).
+
+```go
+// Send to a user
+b.Send(user, "Hello!")
+
+// Send to a chat by ID
+b.Send(tele.ChatID(-100123456789), "Hello channel!")
+```
+
+## SendOptions
+
+`SendOptions` provides full control over how a message is sent:
+
+```go
+type SendOptions struct {
+    ReplyTo              *Message
+    ReplyMarkup          *ReplyMarkup
+    DisableWebPagePreview bool
+    DisableNotification  bool
+    ParseMode            ParseMode
+    Entities             Entities
+    AllowWithoutReply    bool
+    Protected            bool
+    ThreadID             int
+    HasSpoiler           bool
+    ReplyParams          *ReplyParams
+    BusinessConnectionID string
+    EffectID             string
+    Payload              string
+    AllowPaidBroadcast   bool
+}
+```
+
+<ParamField path="ReplyTo" type="*Message">
+  If set, the message is sent as a reply to this message.
+</ParamField>
+
+<ParamField path="ReplyMarkup" type="*ReplyMarkup">
+  Inline or reply keyboard to attach to the message.
+</ParamField>
+
+<ParamField path="DisableWebPagePreview" type="bool">
+  Disables link preview in text messages.
+</ParamField>
+
+<ParamField path="DisableNotification" type="bool">
+  Sends silently — recipients receive no sound notification.
+</ParamField>
+
+<ParamField path="ParseMode" type="ParseMode">
+  Controls text rendering: `ModeHTML`, `ModeMarkdown`, `ModeMarkdownV2`, or `ModeDefault`.
+</ParamField>
+
+<ParamField path="Protected" type="bool">
+  Prevents forwarding and saving of the message content.
+</ParamField>
+
+<ParamField path="ThreadID" type="int">
+  Send into a forum topic thread.
+</ParamField>
+
+<ParamField path="HasSpoiler" type="bool">
+  Marks media as a spoiler (blurred until tapped).
+</ParamField>
+
+## Option flags
+
+Instead of building a full `SendOptions`, you can pass shorthand flags:
+
+```go
+b.Send(user, "text", tele.Silent)             // DisableNotification
+b.Send(user, "text", tele.NoPreview)          // DisableWebPagePreview
+b.Send(user, "text", tele.Protected)          // Protected
+b.Send(user, "text", tele.AllowWithoutReply)  // AllowWithoutReply
+b.Send(user, "text", tele.ForceReply)         // Force a reply prompt
+b.Send(user, "text", tele.OneTimeKeyboard)    // One-time reply keyboard
+b.Send(user, "text", tele.RemoveKeyboard)     // Remove reply keyboard
+```
+
+Multiple flags and options can be combined:
+
+```go
+b.Send(user, "text", tele.Silent, tele.NoPreview, &tele.ReplyMarkup{...})
+```
+
+## Built-in sendable types
+
+### Photo
+
+```go
+type Photo struct {
+    File
+    Width       int    `json:"width"`
+    Height      int    `json:"height"`
+    Caption     string `json:"caption"`
+    CaptionAbove bool
+    HasSpoiler  bool
+}
+```
+
+### Audio
+
+```go
+type Audio struct {
+    File
+    Duration  int
+    Performer string
+    Title     string
+    Caption   string
+    FileName  string
+    Thumbnail *Photo
+    MIME      string
+}
+```
+
+### Video
+
+```go
+type Video struct {
+    File
+    Width     int
+    Height    int
+    Duration  int
+    Caption   string
+    FileName  string
+    Streaming bool
+    Thumbnail *Photo
+    MIME      string
+    HasSpoiler bool
+}
+```
+
+### Document
+
+```go
+type Document struct {
+    File
+    Thumbnail            *Photo
+    Caption              string
+    FileName             string
+    MIME                 string
+    DisableTypeDetection bool
+}
+```
+
+### Voice
+
+```go
+type Voice struct {
+    File
+    Duration int
+    Caption  string
+    MIME     string
+}
+```
+
+### VideoNote
+
+```go
+type VideoNote struct {
+    File
+    Duration  int
+    Length    int
+    Thumbnail *Photo
+}
+```
+
+### Animation
+
+```go
+type Animation struct {
+    File
+    Width     int
+    Height    int
+    Duration  int
+    Caption   string
+    FileName  string
+    Thumbnail *Photo
+    MIME      string
+    HasSpoiler bool
+}
+```
+
+### Sticker
+
+```go
+type Sticker struct {
+    File
+    Width           int
+    Height          int
+    Animated        bool
+    Video           bool
+    Type            StickerSetType
+    Thumbnail       *Photo
+    Emoji           string
+    SetName         string
+    PremiumAnimation *File
+    MaskPosition    *MaskPosition
+    CustomEmojiID   string
+    NeedsRepainting bool
+    FileSize        int64
+}
+```
+
+### Location
+
+```go
+type Location struct {
+    Lat              float32
+    Lng              float32
+    HorizontalAccuracy float32
+    Heading          int
+    AlertRadius      int
+    LivePeriod       int
+}
+```
+
+### Venue
+
+```go
+type Venue struct {
+    Location     Location
+    Title        string
+    Address      string
+    FoursquareID string
+    FoursquareType string
+    GooglePlaceID  string
+    GooglePlaceType string
+}
+```
+
+### Contact
+
+```go
+type Contact struct {
+    PhoneNumber string
+    FirstName   string
+    LastName    string
+    UserID      int64
+    VCard       string
+}
+```
+
+### Dice
+
+```go
+type Dice struct {
+    Type  DiceType
+    Value int
+}
+```
+
+### Poll
+
+See the `Poll` type reference for full field documentation.
+
+## Album
+
+`Album` groups multiple media items into a single multi-media message:
+
+```go
+type Album []Inputtable
+```
+
+`Inputtable` is implemented by `Photo`, `Video`, `Audio`, and `Document`. Albums are sent with `b.SendAlbum()` (not `b.Send()`), and Telegram returns `[]Message` — one per item:
+
+```go
+p := &tele.Photo{File: tele.FromDisk("photo.jpg")}
+v := &tele.Video{File: tele.FromURL("https://example.com/video.mp4")}
+
+msgs, err := b.SendAlbum(user, tele.Album{p, v})
+```
+
+<Note>
+Albums can be sent but never received as a single album update. Each item arrives as a separate `Message` with a shared `MediaGroupID`.
+</Note>

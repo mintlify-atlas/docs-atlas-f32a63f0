@@ -1,0 +1,492 @@
+---
+title: "Layout"
+description: "YAML-driven bot configuration, keyboards, and i18n with the layout subpackage."
+---
+
+The `layout` subpackage (`gopkg.in/telebot.v4/layout`) lets you define your bot's settings, buttons, markups, inline results, and localized text in a single YAML file rather than scattering them through Go code. Template rendering, i18n, and bot settings are all handled for you.
+
+## Installation
+
+```go
+import layout "gopkg.in/telebot.v4/layout"
+```
+
+## Loading a Layout
+
+### From a file path
+
+```go
+// New parses the given layout file.
+func New(path string, funcs ...template.FuncMap) (*Layout, error)
+```
+
+This reads and parses the YAML file at `path`. Optional `template.FuncMap` arguments extend the built-in template functions available in your YAML templates.
+
+```go
+lt, err := layout.New("bot.yml")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### From an embedded filesystem
+
+```go
+// NewFromFS parses the layout from the given fs.FS.
+// It allows reading layout from the go:embed filesystem.
+func NewFromFS(fsys fs.FS, path string, funcs ...template.FuncMap) (*Layout, error)
+```
+
+```go
+//go:embed bot.yml locales
+var static embed.FS
+
+lt, err := layout.NewFromFS(static, "bot.yml")
+```
+
+### Without localization (DefaultLayout)
+
+If you don't need per-context locale switching, use `NewDefault` or `Layout.Default` to get a simplified `DefaultLayout` that takes no `Context` argument:
+
+```go
+// NewDefault parses the given layout file without localization features.
+func NewDefault(path, locale string, funcs ...template.FuncMap) (*DefaultLayout, error)
+
+// Default returns a simplified layout instance with the pre-defined locale.
+func (lt *Layout) Default(locale string) *DefaultLayout
+```
+
+```go
+dlt, err := layout.NewDefault("bot.yml", "en")
+
+// No context required — locale is fixed
+text := dlt.Text("welcome")
+markup := dlt.Markup("main_menu")
+```
+
+## Key Types
+
+<CardGroup cols={2}>
+  <Card title="Button" icon="computer-mouse">
+    Wraps `tele.Btn` with YAML support. Can be a simple reply button (just a text string) or an extended inline/reply button with `unique`, `callback_data`, `web_app`, etc.
+  </Card>
+  <Card title="Markup" icon="table-layout">
+    A named keyboard layout (reply or inline) defined as rows of button references. Supports `resize_keyboard`, `one_time_keyboard`, `force_reply`, and `remove_keyboard`.
+  </Card>
+  <Card title="Result" icon="list">
+    A named inline query result template. Supports all Telegram result types (`article`, `photo`, `audio`, `video`, `gif`, etc.) with Go template rendering.
+  </Card>
+  <Card title="Config" icon="gear">
+    A typed map interface over the `config:` section of the YAML file. Provides `String`, `Int`, `Bool`, `Duration`, `ChatID`, and other typed accessors.
+  </Card>
+</CardGroup>
+
+## YAML Config Structure
+
+The layout file has several top-level sections. Here is the full example from the source (`layout/example.yml`):
+
+```yaml
+settings:
+  token_env: TOKEN          # read bot token from this env var
+  parse_mode: HTML          # default parse mode
+  long_poller: {}           # use long polling
+
+commands:
+  /start: Start the bot
+  /help: How to use the bot
+
+config:
+  str: string
+  num: 123
+  strs:
+    - abc
+    - def
+  nums:
+    - 123
+    - 456
+  obj: &obj
+    dur: 10m
+  arr:
+    - <<: *obj
+    - <<: *obj
+
+buttons:
+  # Shortened reply buttons — just a text string
+  help: Help
+  settings: Settings
+
+  # Extended reply button
+  contact:
+    text: Send a contact
+    request_contact: true
+
+  # Inline button with template callback data
+  stop:
+    unique: stop
+    text: Stop
+    data: '{{.}}'
+
+  # Inline button with multi-part callback data
+  pay:
+    unique: pay
+    text: Pay
+    data:
+      - '{{ .UserID }}'
+      - '{{ .Amount }}'
+      - '{{ .Currency }}'
+
+  # Web App button
+  web_app:
+    text: This is a web app
+    web_app:
+      url: https://google.com
+
+markups:
+  reply_shortened:
+    - [ help ]
+    - [ settings ]
+  reply_extended:
+    keyboard:
+      - [ contact ]
+    one_time_keyboard: true
+  inline:
+    - [ stop ]
+  web_app:
+    - [ web_app ]
+
+results:
+  article:
+    type: article
+    id: '{{ .ID }}'
+    title: '{{ .Title }}'
+    description: '{{ .Description }}'
+    thumbnail_url: '{{ .PreviewURL }}'
+    message_text: '{{ text `article_message` }}'
+```
+
+### Settings section
+
+The `settings:` block maps directly to a `tele.Settings` struct. The parser reads it as:
+
+```go
+// layout/parser.go
+type Settings struct {
+    URL     string
+    Token   string
+    Updates int
+
+    LocalesDir string `yaml:"locales_dir"`
+    TokenEnv   string `yaml:"token_env"`
+    ParseMode  string `yaml:"parse_mode"`
+
+    Webhook    *tele.Webhook    `yaml:"webhook"`
+    LongPoller *tele.LongPoller `yaml:"long_poller"`
+}
+```
+
+<Note>
+Use `token_env` instead of `token` to read the bot token from an environment variable, keeping secrets out of your config file.
+</Note>
+
+## Wiring the Bot
+
+`lt.Settings()` returns a fully populated `tele.Settings` value that you can pass directly to `tele.NewBot`:
+
+```go
+// Settings returns built telebot Settings required for bot initializing.
+func (lt *Layout) Settings() tele.Settings
+```
+
+```go
+lt, err := layout.New("bot.yml")
+if err != nil {
+    log.Fatal(err)
+}
+
+b, err := tele.NewBot(lt.Settings())
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+## Locale Support
+
+### Setting up the middleware
+
+Call `lt.Middleware` to register a Telebot middleware that assigns a locale to each incoming context. The middleware cleans up the locale when the handler returns.
+
+```go
+// LocaleFunc is the function used to fetch the locale of the recipient.
+type LocaleFunc func(tele.Recipient) string
+
+// Middleware builds a telebot middleware to make localization work.
+func (lt *Layout) Middleware(defaultLocale string, localeFunc ...LocaleFunc) tele.MiddlewareFunc
+```
+
+```go
+b.Use(lt.Middleware("en", func(r tele.Recipient) string {
+    // load the user's preferred locale from your database
+    loc, _ := db.UserLocale(r.Recipient())
+    return loc
+}))
+```
+
+If `localeFunc` is omitted (or returns an empty string), `defaultLocale` is used.
+
+### Reading and changing a locale
+
+```go
+// Locale returns the context locale.
+func (lt *Layout) Locale(c tele.Context) (string, bool)
+
+// SetLocale allows you to change a locale for the passed context.
+func (lt *Layout) SetLocale(c tele.Context, locale string)
+```
+
+```go
+locale, ok := lt.Locale(c)
+lt.SetLocale(c, "ru")
+```
+
+### Locale files
+
+By default the layout looks for locale files in the `locales/` directory next to the YAML config. Each file is named `<locale>.yml` and contains flat or nested key-value pairs that support Go templates:
+
+```yaml
+# locales/en.yml
+article_message: This is an article.
+
+nested:
+  example: |-
+    This is {{ . }}.
+```
+
+The `locales_dir` setting key changes this directory:
+
+```yaml
+settings:
+  locales_dir: i18n
+```
+
+## Text Rendering
+
+```go
+// Text returns a text whose locale is dependent on the context.
+// The optional argument is passed to the text/template engine.
+func (lt *Layout) Text(c tele.Context, k string, args ...interface{}) string
+
+// TextLocale is like Text but takes an explicit locale.
+func (lt *Layout) TextLocale(locale, k string, args ...interface{}) string
+```
+
+```go
+// locales/en.yml:  start: Hi, {{.FirstName}}!
+func onStart(c tele.Context) error {
+    return c.Send(lt.Text(c, "start", c.Sender()))
+}
+```
+
+Template keys support dot notation for nested values — `lt.Text(c, "nested.example", "telebot")` returns `"This is telebot."`.
+
+## Markup Helpers
+
+```go
+// Markup returns a *tele.ReplyMarkup whose locale depends on the context.
+func (lt *Layout) Markup(c tele.Context, k string, args ...interface{}) *tele.ReplyMarkup
+
+// MarkupLocale is like Markup but takes an explicit locale.
+func (lt *Layout) MarkupLocale(locale, k string, args ...interface{}) *tele.ReplyMarkup
+```
+
+```go
+// markups:
+//   menu:
+//   - [ help, settings ]
+func onStart(c tele.Context) error {
+    return c.Send(
+        lt.Text(c, "welcome"),
+        lt.Markup(c, "menu"),
+    )
+}
+```
+
+The layout automatically detects whether the markup is inline or reply based on the button types in use. An error is returned if you mix inline and reply buttons in the same markup.
+
+## Button Helpers
+
+```go
+// Button returns a *tele.Btn whose locale depends on the context.
+// Use this to build dynamic markups at runtime.
+func (lt *Layout) Button(c tele.Context, k string, args ...interface{}) *tele.Btn
+
+// Callback returns a callback endpoint, used with b.Handle.
+func (lt *Layout) Callback(k string) tele.CallbackEndpoint
+```
+
+```go
+// Register a handler for the "stop" inline button
+b.Handle(lt.Callback("stop"), onStop)
+
+// Build buttons dynamically and assemble your own markup
+btns := make([]tele.Btn, len(items))
+for i, item := range items {
+    btns[i] = *lt.Button(c, "item", struct {
+        Number int
+        Item   Item
+    }{Number: i, Item: item})
+}
+
+m := b.NewMarkup()
+m.Inline(m.Row(btns...))
+```
+
+## Inline Result Helpers
+
+```go
+// Result returns a tele.Result whose locale depends on the context.
+func (lt *Layout) Result(c tele.Context, k string, args ...interface{}) tele.Result
+
+// ResultLocale is like Result but takes an explicit locale.
+func (lt *Layout) ResultLocale(locale, k string, args ...interface{}) tele.Result
+```
+
+```go
+// results:
+//   article:
+//     type: article
+//     id: '{{ .ID }}'
+//     title: '{{ .Title }}'
+//     message_text: '{{ text `article_message` }}'
+func onQuery(c tele.Context) error {
+    results := make(tele.Results, len(articles))
+    for i, article := range articles {
+        results[i] = lt.Result(c, "article", article)
+    }
+    return c.Answer(&tele.QueryResponse{
+        Results:   results,
+        CacheTime: 100,
+    })
+}
+```
+
+## Accessing Config Values
+
+The `config:` section is exposed through the `Config` struct embedded in `Layout`:
+
+```go
+// String returns a field cast to string.
+func (c *Config) String(k string) string
+
+// Int returns a field cast to int.
+func (c *Config) Int(k string) int
+
+// Int64 returns a field cast to int64.
+func (c *Config) Int64(k string) int64
+
+// Bool returns a field cast to bool.
+func (c *Config) Bool(k string) bool
+
+// Duration returns a field cast to time.Duration.
+func (c *Config) Duration(k string) time.Duration
+
+// ChatID returns a field cast to tele.ChatID.
+func (c *Config) ChatID(k string) tele.ChatID
+
+// Get returns a child map field wrapped in Config.
+func (c *Config) Get(k string) *Config
+
+// Unmarshal parses the whole config into a struct.
+func (c *Config) Unmarshal(v interface{}) error
+```
+
+```go
+token  := lt.String("api_key")
+admin  := lt.ChatID("admin_chat")
+timeout := lt.Duration("obj.dur") // 10m
+```
+
+## Localized Bot Commands
+
+Use `lt.Commands()` or `lt.CommandsLocale()` to register bot commands with localized descriptions:
+
+```go
+// Commands returns a list of tele.Command for b.SetCommands.
+func (lt *Layout) Commands() []tele.Command
+
+// CommandsLocale returns localized tele.Commands for a given locale.
+func (lt *Layout) CommandsLocale(locale string, args ...interface{}) []tele.Command
+```
+
+```yaml
+# bot.yml
+commands:
+  /start: '{{ text `cmdStart` }}'
+```
+
+```yaml
+# locales/en.yml
+cmdStart: Start the bot
+```
+
+```yaml
+# locales/ru.yml
+cmdStart: Запуск бота
+```
+
+```go
+b.SetCommands(lt.CommandsLocale("en"), "en")
+b.SetCommands(lt.CommandsLocale("ru"), "ru")
+```
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "log"
+
+    layout "gopkg.in/telebot.v4/layout"
+    tele "gopkg.in/telebot.v4"
+)
+
+var lt *layout.Layout
+
+func main() {
+    var err error
+    lt, err = layout.New("bot.yml")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    b, err := tele.NewBot(lt.Settings())
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Attach locale middleware — resolves locale for each context
+    b.Use(lt.Middleware("en", func(r tele.Recipient) string {
+        locale, _ := db.UserLocale(r.Recipient())
+        return locale
+    }))
+
+    b.Handle("/start", onStart)
+    b.Handle(lt.Callback("settings"), onSettings)
+
+    b.Start()
+}
+
+func onStart(c tele.Context) error {
+    return c.Send(
+        lt.Text(c, "welcome", c.Sender()),
+        lt.Markup(c, "main_menu"),
+    )
+}
+
+func onSettings(c tele.Context) error {
+    return c.Edit(
+        lt.Text(c, "settings_prompt"),
+        lt.Markup(c, "settings_menu"),
+    )
+}
+```

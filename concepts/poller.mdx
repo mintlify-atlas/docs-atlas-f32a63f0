@@ -1,0 +1,241 @@
+---
+title: "Poller"
+description: "The Poller interface, LongPoller, MiddlewarePoller, and ProcessUpdate for webhook or manual update injection."
+---
+
+A Poller is responsible for delivering `Update` objects to the bot's internal channel. Telebot decouples update fetching from update processing, so you can swap pollers without touching your handlers.
+
+## The Poller interface
+
+```go
+// Poller is a provider of Updates.
+//
+// All pollers must implement Poll(), which accepts bot
+// pointer and subscription channel and start polling
+// synchronously straight away.
+type Poller interface {
+    Poll(b *Bot, updates chan Update, stop chan struct{})
+}
+```
+
+<ParamField path="b" type="*Bot">
+  The bot instance. Use it to call `b.getUpdates` or other API methods.
+</ParamField>
+
+<ParamField path="updates" type="chan Update">
+  Send each received `Update` to this channel. The bot's main loop reads from it.
+</ParamField>
+
+<ParamField path="stop" type="chan struct{}">
+  Closed by the bot when `b.Stop()` is called. Your `Poll` implementation must return when this channel is closed.
+</ParamField>
+
+Implement this interface to build a custom poller — for example, an SQS poller, a webhook receiver, or a test fixture.
+
+## LongPoller
+
+The default and most common poller. It calls `getUpdates` in a loop and pushes each update into the channel.
+
+```go
+// LongPoller is a classic LongPoller with timeout.
+type LongPoller struct {
+    Limit          int
+    Timeout        time.Duration
+    LastUpdateID   int
+    AllowedUpdates []string `yaml:"allowed_updates"`
+}
+```
+
+<ParamField path="Limit" type="int">
+  Maximum number of updates to fetch per request. Telegram accepts values from 1 to 100. Defaults to the server default (100) when set to 0.
+</ParamField>
+
+<ParamField path="Timeout" type="time.Duration">
+  Long-polling timeout. The server holds the connection open for up to this duration if no updates are available. A value of 0 triggers short polling (not recommended for production).
+</ParamField>
+
+<ParamField path="LastUpdateID" type="int">
+  The offset used in the next `getUpdates` call. Automatically advanced after each batch of updates. You can set this to resume from a known position.
+</ParamField>
+
+<ParamField path="AllowedUpdates" type="[]string">
+  Filter which update types the server delivers. When empty, all update types are received. Uses the same string values as the Telegram Bot API (`"message"`, `"callback_query"`, etc.).
+</ParamField>
+
+### Example
+
+```go
+import (
+    "time"
+    tele "gopkg.in/telebot.v4"
+)
+
+b, err := tele.NewBot(tele.Settings{
+    Token: os.Getenv("TOKEN"),
+    Poller: &tele.LongPoller{
+        Timeout: 10 * time.Second,
+        AllowedUpdates: []string{"message", "callback_query"},
+    },
+})
+```
+
+<Tip>
+  The package-level `tele.AllowedUpdates` slice contains all known update type strings and is a convenient starting point.
+</Tip>
+
+### AllowedUpdates reference
+
+The following strings are defined in `poller.go`:
+
+```go
+var AllowedUpdates = []string{
+    "message",
+    "edited_message",
+    "channel_post",
+    "edited_channel_post",
+    "message_reaction",
+    "message_reaction_count",
+    "inline_query",
+    "chosen_inline_result",
+    "callback_query",
+    "shipping_query",
+    "pre_checkout_query",
+    "poll",
+    "poll_answer",
+    "my_chat_member",
+    "chat_member",
+    "chat_join_request",
+    "chat_boost",
+    "removed_chat_boost",
+}
+```
+
+## MiddlewarePoller
+
+A poller wrapper that filters updates *before* they reach your handlers. This is useful for blocking updates early — before a context and handler chain are even created.
+
+```go
+// MiddlewarePoller is a special kind of poller that acts
+// like a filter for updates. It could be used for spam
+// handling, banning or whatever.
+type MiddlewarePoller struct {
+    Capacity int // Default: 1
+    Poller   Poller
+    Filter   func(*Update) bool
+}
+
+// NewMiddlewarePoller constructs a new middleware poller.
+func NewMiddlewarePoller(original Poller, filter func(*Update) bool) *MiddlewarePoller
+```
+
+<ParamField path="Capacity" type="int">
+  Buffer size of the internal relay channel. Defaults to 1. Increase for high-throughput scenarios where filtering is expensive.
+</ParamField>
+
+<ParamField path="Poller" type="Poller">
+  The underlying poller to wrap.
+</ParamField>
+
+<ParamField path="Filter" type="func(*Update) bool">
+  Return `true` to pass the update through, `false` to drop it silently.
+</ParamField>
+
+### Example — filter by chat type
+
+```go
+basePoller := &tele.LongPoller{Timeout: 10 * time.Second}
+
+// Only process private messages
+poller := tele.NewMiddlewarePoller(basePoller, func(u *tele.Update) bool {
+    if u.Message == nil {
+        return true // let non-message updates through
+    }
+    return u.Message.Chat.Type == tele.ChatPrivate
+})
+
+b, err := tele.NewBot(tele.Settings{
+    Token:  os.Getenv("TOKEN"),
+    Poller: poller,
+})
+```
+
+<Note>
+  `MiddlewarePoller` operates on raw `*Update` values — before any `Context` is created. For logic that needs a full context (sender info, `c.Get`/`c.Set`), use handler-level [middleware](/concepts/middleware) instead.
+</Note>
+
+## ProcessUpdate — manual update injection
+
+When using webhooks or writing tests, you may want to inject updates directly without a polling loop:
+
+```go
+// ProcessUpdate processes a single incoming update.
+// A started bot calls this function automatically.
+func (b *Bot) ProcessUpdate(u Update)
+```
+
+```go
+// In a webhook HTTP handler:
+func webhookHandler(w http.ResponseWriter, r *http.Request) {
+    var u tele.Update
+    if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+        http.Error(w, "bad request", http.StatusBadRequest)
+        return
+    }
+    bot.ProcessUpdate(u)
+    w.WriteHeader(http.StatusOK)
+}
+```
+
+`ProcessUpdate` creates a new `Context` from the update and routes it through the same handler/middleware pipeline as the polling loop.
+
+## Implementing a custom Poller
+
+<Steps>
+  <Step title="Define a struct">
+    ```go
+    type SQSPoller struct {
+        Queue *sqs.Client
+        URL   string
+    }
+    ```
+  </Step>
+  <Step title="Implement Poll">
+    ```go
+    func (p *SQSPoller) Poll(b *tele.Bot, updates chan tele.Update, stop chan struct{}) {
+        for {
+            select {
+            case <-stop:
+                return
+            default:
+            }
+
+            msgs, err := p.Queue.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+                QueueUrl: &p.URL,
+            })
+            if err != nil {
+                continue
+            }
+
+            for _, msg := range msgs.Messages {
+                var u tele.Update
+                if err := json.Unmarshal([]byte(*msg.Body), &u); err == nil {
+                    updates <- u
+                }
+            }
+        }
+    }
+    ```
+  </Step>
+  <Step title="Pass to Settings">
+    ```go
+    b, err := tele.NewBot(tele.Settings{
+        Token:  os.Getenv("TOKEN"),
+        Poller: &SQSPoller{Queue: sqsClient, URL: queueURL},
+    })
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Your `Poll` implementation must return promptly when `stop` is closed. Blocking indefinitely will cause `b.Stop()` to hang.
+</Warning>

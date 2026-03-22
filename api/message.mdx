@@ -1,0 +1,500 @@
+---
+title: "Message"
+description: "Reference for the Message struct, MessageEntity, and related types."
+---
+
+The `Message` struct represents a Telegram message and is returned by most send/edit operations.
+
+## Message
+
+```go
+type Message struct { ... }
+```
+
+### Core Fields
+
+<ResponseField name="ID" type="int">
+  Unique message identifier inside the chat. JSON: `message_id`.
+</ResponseField>
+
+<ResponseField name="ThreadID" type="int">
+  Thread (topic) identifier for supergroup forum messages. JSON: `message_thread_id`.
+</ResponseField>
+
+<ResponseField name="Sender" type="*User">
+  The user who sent the message. `nil` for channel posts.
+</ResponseField>
+
+<ResponseField name="Unixtime" type="int64">
+  Unix timestamp of the message. Use `Message.Time()` to obtain a `time.Time`.
+</ResponseField>
+
+<ResponseField name="Chat" type="*Chat">
+  The conversation the message belongs to.
+</ResponseField>
+
+<ResponseField name="SenderChat" type="*Chat">
+  Sender chat when a message is sent on behalf of a chat.
+</ResponseField>
+
+### Text and Caption
+
+<ResponseField name="Text" type="string">
+  UTF-8 text content for plain text messages.
+</ResponseField>
+
+<ResponseField name="Payload" type="string">
+  Command arguments extracted from the message text. For `/start deep-link`, this holds the deep-link parameter. Not serialized from JSON — populated by Telebot during update processing.
+
+  ```go
+  b.Handle("/start", func(c tele.Context) error {
+      ref := c.Message().Payload // deep-link value
+      return c.Send("Hello, " + ref)
+  })
+  ```
+</ResponseField>
+
+<ResponseField name="Entities" type="Entities">
+  Special entities in `Text` (mentions, URLs, commands, etc.).
+</ResponseField>
+
+<ResponseField name="Caption" type="string">
+  Caption for media messages (photo, video, etc.).
+</ResponseField>
+
+<ResponseField name="CaptionEntities" type="Entities">
+  Special entities in `Caption`.
+</ResponseField>
+
+<ResponseField name="EffectID" type="string">
+  Unique identifier of a message effect applied to the message.
+</ResponseField>
+
+### Forward / Reply Info
+
+<ResponseField name="OriginalSender" type="*User">
+  Original sender for forwarded messages. JSON: `forward_from`.
+</ResponseField>
+
+<ResponseField name="OriginalChat" type="*Chat">
+  Original channel chat for forwarded channel posts. JSON: `forward_from_chat`.
+</ResponseField>
+
+<ResponseField name="OriginalMessageID" type="int">
+  Original message identifier for forwarded channel posts.
+</ResponseField>
+
+<ResponseField name="OriginalUnixtime" type="int">
+  Unix timestamp of the original forwarded message.
+</ResponseField>
+
+<ResponseField name="Origin" type="*MessageOrigin">
+  Structured origin information for forwarded messages (`forward_origin`).
+</ResponseField>
+
+<ResponseField name="AutomaticForward" type="bool">
+  `true` when the message is a channel post automatically forwarded to the linked discussion group.
+</ResponseField>
+
+<ResponseField name="ReplyTo" type="*Message">
+  The message being replied to. Does not contain nested `ReplyTo`.
+</ResponseField>
+
+<ResponseField name="ExternalReply" type="*ExternalReply">
+  Information about a reply to a message from another chat or topic.
+</ResponseField>
+
+<ResponseField name="Quote" type="*TextQuote">
+  The quoted portion of the replied-to message.
+</ResponseField>
+
+<ResponseField name="Via" type="*User">
+  Bot through which the message was sent (inline mode). JSON: `via_bot`.
+</ResponseField>
+
+### Media Fields
+
+<ResponseField name="Photo" type="*Photo">
+  Highest-resolution photo thumbnail.
+</ResponseField>
+
+<ResponseField name="Audio" type="*Audio">
+  Audio file information.
+</ResponseField>
+
+<ResponseField name="Video" type="*Video">
+  Video file information.
+</ResponseField>
+
+<ResponseField name="Document" type="*Document">
+  General file information.
+</ResponseField>
+
+<ResponseField name="Voice" type="*Voice">
+  Voice message information.
+</ResponseField>
+
+<ResponseField name="VideoNote" type="*VideoNote">
+  Video note (round video) information.
+</ResponseField>
+
+<ResponseField name="Animation" type="*Animation">
+  GIF or H.264 animation information.
+</ResponseField>
+
+<ResponseField name="Sticker" type="*Sticker">
+  Sticker information.
+</ResponseField>
+
+<ResponseField name="Contact" type="*Contact">
+  Shared contact.
+</ResponseField>
+
+<ResponseField name="Location" type="*Location">
+  Shared geographic location.
+</ResponseField>
+
+<ResponseField name="Venue" type="*Venue">
+  Venue information.
+</ResponseField>
+
+<ResponseField name="Poll" type="*Poll">
+  Native poll.
+</ResponseField>
+
+<ResponseField name="Game" type="*Game">
+  Game information.
+</ResponseField>
+
+<ResponseField name="Dice" type="*Dice">
+  Animated dice result.
+</ResponseField>
+
+<ResponseField name="PaidMedia" type="PaidMedias">
+  Paid media content attached to the message.
+</ResponseField>
+
+### Service Message Fields
+
+<ResponseField name="UserJoined" type="*User">
+  User who just joined the chat. JSON: `new_chat_member`.
+</ResponseField>
+
+<ResponseField name="UsersJoined" type="[]User">
+  Multiple users who joined simultaneously. JSON: `new_chat_members`.
+</ResponseField>
+
+<ResponseField name="UserLeft" type="*User">
+  User who left the chat. JSON: `left_chat_member`.
+</ResponseField>
+
+<ResponseField name="NewGroupTitle" type="string">
+  New chat title service message.
+</ResponseField>
+
+<ResponseField name="NewGroupPhoto" type="*Photo">
+  New chat photo service message.
+</ResponseField>
+
+<ResponseField name="GroupCreated" type="bool">
+  `true` if the group was just created.
+</ResponseField>
+
+<ResponseField name="SuperGroupCreated" type="bool">
+  `true` if a supergroup was just created.
+</ResponseField>
+
+<ResponseField name="ChannelCreated" type="bool">
+  `true` if a channel was just created.
+</ResponseField>
+
+<ResponseField name="MigrateTo" type="int64">
+  The supergroup chat ID that this group migrated to.
+</ResponseField>
+
+<ResponseField name="MigrateFrom" type="int64">
+  The old group chat ID that this supergroup migrated from.
+</ResponseField>
+
+<ResponseField name="PinnedMessage" type="*Message">
+  Service message about a pinned message.
+</ResponseField>
+
+<ResponseField name="Invoice" type="*Invoice">
+  Invoice for a payment.
+</ResponseField>
+
+<ResponseField name="Payment" type="*Payment">
+  Service message about a successful payment. JSON: `successful_payment`.
+</ResponseField>
+
+<ResponseField name="RefundedPayment" type="*RefundedPayment">
+  Service message about a refunded payment.
+</ResponseField>
+
+<ResponseField name="Protected" type="bool">
+  `true` if the message content is protected from forwarding and saving.
+</ResponseField>
+
+<ResponseField name="AlbumID" type="string">
+  Media group identifier — all messages in the same album share this ID. JSON: `media_group_id`.
+</ResponseField>
+
+<ResponseField name="Signature" type="string">
+  Author signature for channel posts.
+</ResponseField>
+
+<ResponseField name="TopicMessage" type="bool">
+  `true` if sent inside a forum topic.
+</ResponseField>
+
+<ResponseField name="ReplyMarkup" type="*ReplyMarkup">
+  Inline keyboard attached to the message.
+</ResponseField>
+
+<ResponseField name="LastEdit" type="int64">
+  Unix timestamp of the last edit. Use `Message.LastEdited()` to get `time.Time`.
+</ResponseField>
+
+<ResponseField name="BusinessConnectionID" type="string">
+  Identifier of the business connection the message belongs to.
+</ResponseField>
+
+---
+
+## Methods
+
+### Time
+
+```go
+func (m *Message) Time() time.Time
+```
+
+Returns the message creation time in local time.
+
+### LastEdited
+
+```go
+func (m *Message) LastEdited() time.Time
+```
+
+Returns the time of the last edit in local time.
+
+### MessageSig
+
+```go
+func (m *Message) MessageSig() (string, int64)
+```
+
+Implements the `Editable` interface. Returns `(strconv.Itoa(m.ID), m.Chat.ID)`.
+
+### Inaccessible
+
+```go
+func (m *Message) Inaccessible() bool
+```
+
+Returns `true` when the message is an inaccessible message object (sender is nil).
+
+### IsForwarded
+
+```go
+func (m *Message) IsForwarded() bool
+```
+
+Returns `true` if the message is a forwarded copy.
+
+### IsReply
+
+```go
+func (m *Message) IsReply() bool
+```
+
+Returns `true` if the message is a reply to another message.
+
+### Private
+
+```go
+func (m *Message) Private() bool
+```
+
+Returns `true` for direct/private messages.
+
+### FromGroup
+
+```go
+func (m *Message) FromGroup() bool
+```
+
+Returns `true` for group or supergroup messages.
+
+### FromChannel
+
+```go
+func (m *Message) FromChannel() bool
+```
+
+Returns `true` for channel posts.
+
+### IsService
+
+```go
+func (m *Message) IsService() bool
+```
+
+Returns `true` for service messages (joins, title changes, migrations, etc.).
+
+### Media
+
+```go
+func (m *Message) Media() Media
+```
+
+Returns the first media attachment found (photo, voice, audio, animation, sticker, document, video, video note). Returns `nil` if none.
+
+### EntityText
+
+```go
+func (m *Message) EntityText(e MessageEntity) string
+```
+
+Extracts the substring identified by the given entity using correct UTF-16 indexing.
+
+---
+
+## MessageEntity
+
+```go
+type MessageEntity struct {
+    Type          EntityType `json:"type"`
+    Offset        int        `json:"offset"`
+    Length        int        `json:"length"`
+    URL           string     `json:"url,omitempty"`
+    User          *User      `json:"user,omitempty"`
+    Language      string     `json:"language,omitempty"`
+    CustomEmojiID string     `json:"custom_emoji_id,omitempty"`
+    ChatUsername  string     `json:"chat_username,omitempty"`
+}
+```
+
+<ResponseField name="Type" type="EntityType">
+  The entity type.
+</ResponseField>
+
+<ResponseField name="Offset" type="int">
+  Start offset in UTF-16 code units.
+</ResponseField>
+
+<ResponseField name="Length" type="int">
+  Length in UTF-16 code units.
+</ResponseField>
+
+<ResponseField name="URL" type="string">
+  URL for `EntityTextLink` type.
+</ResponseField>
+
+<ResponseField name="User" type="*User">
+  User for `EntityTMention` type.
+</ResponseField>
+
+<ResponseField name="Language" type="string">
+  Programming language for `EntityCodeBlock` type.
+</ResponseField>
+
+<ResponseField name="CustomEmojiID" type="string">
+  Custom emoji ID for `EntityCustomEmoji` type.
+</ResponseField>
+
+### Entity Type Constants
+
+```go
+const (
+    EntityMention       EntityType = "mention"
+    EntityTMention      EntityType = "text_mention"
+    EntityHashtag       EntityType = "hashtag"
+    EntityCashtag       EntityType = "cashtag"
+    EntityCommand       EntityType = "bot_command"
+    EntityURL           EntityType = "url"
+    EntityEmail         EntityType = "email"
+    EntityPhone         EntityType = "phone_number"
+    EntityBold          EntityType = "bold"
+    EntityItalic        EntityType = "italic"
+    EntityUnderline     EntityType = "underline"
+    EntityStrikethrough EntityType = "strikethrough"
+    EntityCode          EntityType = "code"
+    EntityCodeBlock     EntityType = "pre"
+    EntityTextLink      EntityType = "text_link"
+    EntitySpoiler       EntityType = "spoiler"
+    EntityCustomEmoji   EntityType = "custom_emoji"
+    EntityBlockquote    EntityType = "blockquote"
+    EntityEBlockquote   EntityType = "expandable_blockquote"
+)
+```
+
+`Entities` is a named type alias:
+
+```go
+type Entities []MessageEntity
+```
+
+---
+
+## StoredMessage
+
+A convenience struct suitable for storing in a database and later using as an `Editable`.
+
+```go
+type StoredMessage struct {
+    MessageID string `sql:"message_id" json:"message_id"`
+    ChatID    int64  `sql:"chat_id" json:"chat_id"`
+}
+
+func (x StoredMessage) MessageSig() (string, int64)
+```
+
+```go
+// Store a message reference
+stored := tele.StoredMessage{
+    MessageID: strconv.Itoa(msg.ID),
+    ChatID:    msg.Chat.ID,
+}
+
+// Later, edit using the stored reference
+b.Edit(stored, "updated text")
+```
+
+---
+
+## MessageOrigin
+
+Describes the original source of a forwarded message.
+
+```go
+type MessageOrigin struct {
+    Type         string `json:"type"`
+    DateUnixtime int64  `json:"date"`
+    Sender       *User  `json:"sender_user,omitempty"`
+    SenderUsername string `json:"sender_user_name,omitempty"`
+    SenderChat   *Chat  `json:"sender_chat,omitempty"`
+    Chat         *Chat  `json:"chat,omitempty"`
+    MessageID    int    `json:"message_id,omitempty"`
+    Signature    string `json:"author_signature,omitempty"`
+}
+```
+
+Call `mo.Time()` to obtain the original send time as `time.Time`.
+
+---
+
+## TextQuote
+
+Contains the quoted portion of a replied-to message.
+
+```go
+type TextQuote struct {
+    Text     string          `json:"text"`
+    Entities []MessageEntity `json:"entities"`
+    Position int             `json:"position"`
+    Manual   bool            `json:"is_manual"`
+}
+```
