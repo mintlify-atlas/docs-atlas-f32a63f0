@@ -126,7 +126,7 @@ Telebot ships with `LongPoller` (polling via `getUpdates`) and `Webhook` (push v
 
 ## Feature highlights
 
-<Columns cols={2}>
+<CardGroup cols={2}>
   <Card title="Command routing" icon="terminal">
     Route `/command` and `/command@botname` transparently. Extract payload and space-separated arguments with `c.Message().Payload` and `c.Args()`.
   </Card>
@@ -143,7 +143,7 @@ Telebot ships with `LongPoller` (polling via `getUpdates`) and `Webhook` (push v
     Handle `tele.OnQuery` and respond with typed result objects (`PhotoResult`, `ArticleResult`, etc.) through `c.Answer()`.
   </Card>
   <Card title="Editable messages" icon="pencil">
-    Any struct that implements `MessageSig() (int, int64)` can be passed to `b.Edit()` or `b.Delete()` — including your own database model structs.
+    Any struct that implements `MessageSig() (string, int64)` can be passed to `b.Edit()` or `b.Delete()` — including your own database model structs.
   </Card>
   <Card title="Concurrent by default" icon="zap">
     Handlers run in goroutines. The updates channel capacity (default 100) and `Synchronous` mode are both configurable in `Settings`.
@@ -151,7 +151,7 @@ Telebot ships with `LongPoller` (polling via `getUpdates`) and `Webhook` (push v
   <Card title="Webhook support" icon="webhook">
     Drop in a `Webhook` poller for production deployments. Telebot handles TLS, port binding, and update delivery — you only configure the URL.
   </Card>
-</Columns>
+</CardGroup>
 
 ## Package import
 

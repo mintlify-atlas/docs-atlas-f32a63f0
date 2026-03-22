@@ -786,6 +786,66 @@ Returns the list of profile photos for a user.
 
 ---
 
+### `b.InviteLink()`
+
+```go
+func (b *Bot) InviteLink(chat *Chat) (string, error)
+```
+
+Exports the primary invite link for a chat. Returns the invite link URL.
+
+---
+
+### `b.CreateInviteLink()`
+
+```go
+func (b *Bot) CreateInviteLink(chat Recipient, link *ChatInviteLink) (*ChatInviteLink, error)
+```
+
+Creates an additional invite link for a chat. The `link` parameter can specify a `Name`, `ExpireUnixtime`, `MemberLimit`, or `JoinRequest` flag.
+
+---
+
+### `b.EditInviteLink()`
+
+```go
+func (b *Bot) EditInviteLink(chat Recipient, link *ChatInviteLink) (*ChatInviteLink, error)
+```
+
+Edits a non-primary invite link created by the bot.
+
+---
+
+### `b.RevokeInviteLink()`
+
+```go
+func (b *Bot) RevokeInviteLink(chat Recipient, link string) (*ChatInviteLink, error)
+```
+
+Revokes an invite link created by the bot. The revoked link can no longer be used.
+
+---
+
+### `b.ApproveJoinRequest()`
+
+```go
+func (b *Bot) ApproveJoinRequest(chat Recipient, user *User) error
+```
+
+Approves a pending join request (requires `OnChatJoinRequest` handler).
+
+---
+
+### `b.DeclineJoinRequest()`
+
+```go
+func (b *Bot) DeclineJoinRequest(chat Recipient, user *User) error
+```
+
+Declines a pending join request.
+
+---
+
 ## Callbacks & Queries
 
 ### `b.Respond()`
@@ -1175,16 +1235,6 @@ var u tele.Update
 json.NewDecoder(r.Body).Decode(&u)
 b.ProcessUpdate(u)
 ```
-
----
-
-### `b.ProcessContext()`
-
-```go
-func (b *Bot) ProcessContext(c Context)
-```
-
-Lower-level variant of `ProcessUpdate`. Dispatches a pre-built `Context` through the handler routing logic.
 
 ---
 
